@@ -51,4 +51,4 @@ Windows PowerShell 如限制运行 `npm.ps1`，使用 `npm.cmd ci` 和 `npm.cmd 
 
 ## 许可证
 
-当前版本尚未指定软件许可证。公开分发时，请由代码权利方确认许可证并在仓库根目录加入 `LICENSE`，同时更新本节。Smart BIAI、DeepSeek 和豆包服务的接入及使用按各服务的条款执行。
+本项目源码按 [Apache License 2.0](LICENSE) 授权，SPDX 标识为 `Apache-2.0`。Smart BIAI、DeepSeek 和豆包服务的接入及使用按各服务的条款执行。
