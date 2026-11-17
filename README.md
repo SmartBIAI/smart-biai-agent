@@ -11,6 +11,7 @@ BIAI Agent 把查询海外社媒账号、生成视频、编辑发布文案和安
 | 了解 Smart BIAI，获取或申请接入凭证 | [Smart BIAI 官网](https://www.biaibiai.com/) |
 | 查看视频生成接口 | [Smart BIAI 开发者文档](https://developer.biaibiai.com/docs) |
 | 在本机试用，或部署到自己的服务器 | [部署说明](doc/部署说明.md) |
+| 把公开体验版挂到宝塔 Nginx 子路径 | [公开体验版部署](doc/部署说明.md#宝塔公开体验版) |
 | 将本地项目发布到 GitHub | [GitHub 发布指南](doc/GitHub发布指南.md) |
 
 ## 两分钟试用

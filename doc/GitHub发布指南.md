@@ -24,7 +24,7 @@
 ```sh
 git init -b main
 git check-ignore -v -- doc/.env.local .data/ "doc/SmartBIAI接口文档-内部Claw对接.md"
-git add -- .gitignore README.md package.json package-lock.json server.mjs integrations.mjs live-jobs.mjs mock.mjs media-storage.mjs web doc/.env.example "doc/部署说明.md" "doc/GitHub发布指南.md"
+git add -- .gitignore README.md package.json package-lock.json server.mjs integrations.mjs live-jobs.mjs mock.mjs media-storage.mjs build-demo.mjs web doc/.env.example "doc/部署说明.md" "doc/GitHub发布指南.md"
 git diff --cached --name-only
 git diff --cached --stat
 ```
