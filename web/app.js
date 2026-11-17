@@ -1,0 +1,1045 @@
+const icons = {
+  image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
+  audio: '<path d="M3 12h2m3-4v8m4-12v16m4-12v8m3-4h2"/>',
+  agent: '<path d="M8 10h8m-8 4h5M6 20l3-3h8a4 4 0 0 0 4-4V8a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v5a4 4 0 0 0 3 4z"/>',
+  accounts: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/>',
+  tasks: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4m8-4v4M3 10h18m-13 5h3"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M10 3h4l1 3 3 1 3 3v4l-3 3-3 1-1 3h-4l-1-3-3-1-3-3v-4l3-3 3-1z"/>',
+  arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
+  send: '<path d="M4 4l17 8-17 8 3-8-3-8zm3 8h14"/>',
+  video: '<rect x="3" y="5" width="13" height="14" rx="3"/><path d="m16 10 5-3v10l-5-3"/>',
+  play: '<path d="m9 5 11 7-11 7z"/>',
+  plus: '<path d="M12 5v14m-7-7h14"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  search: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  link: '<path d="M13 11a3 3 0 0 0-4.5 0l-3 3a3 3 0 1 0 4 4l1.5-1.5m0-3a3 3 0 0 0 4.5 0l3-3a3 3 0 1 0-4-4L13 8"/>'
+};
+
+const icon = (name, size = 19) => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" stroke-linecap="round">${icons[name]}</svg>`;
+const pages = { agent: 'BIAI Agent', accounts: '社媒账号', tasks: '发布任务', settings: '连接设置' };
+const main = document.querySelector('#main');
+const navigation = document.querySelector('#navigation');
+const videoDialog = document.querySelector('#video-dialog');
+const zoneLabels = {
+  'Asia/Shanghai': '上海', 'Asia/Tokyo': '东京', 'America/New_York': '纽约',
+  'America/Los_Angeles': '洛杉矶', 'Europe/London': '伦敦', UTC: 'UTC'
+};
+const pubStatuses = {
+  queued: ['等待发布', 'purple'], scheduled: ['已排期', 'purple'], publishing: ['发布中', 'blue'],
+  completed: ['发布完成', 'green'], expired: ['素材已过期', 'red'], missed: ['已错过', 'red'], canceled: ['已取消', 'gray'],
+  submitting: ['正在发送', 'blue'], queued_upstream: ['平台处理中', 'blue'], failed: ['发布失败', 'red'], unknown: ['状态待确认', 'orange']
+};
+
+const state = {
+  page: '', accounts: [], models: [], settings: {}, generations: [], publications: [],
+  chat: [], drafts: new Map(), intentBusy: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
+  taskTab: 'all', taskId: '', taskSearch: '', taskAccount: '', loaded: false,
+  mode: sessionStorage.getItem('biai-mode') === 'live' ? 'live' : 'mock', issues: {},
+  history: [], conversation: null, historyBusy: false
+};
+const modeSelect = document.querySelector('#run-mode');
+let conversationDirty = false;
+let conversationTimer;
+let conversationSave = Promise.resolve(true);
+
+function esc(value = '') {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+
+function selected(option, value) { return option === value ? ' selected' : ''; }
+function findAccount(id) { return state.accounts.find(account => account.id === id); }
+function taskAccount(task) { return task.account ?? findAccount(task.accountId); }
+function findVideo(id) { return state.generations.find(video => video.id === id); }
+function defaultZone() { return state.settings.preferences?.zone || 'Asia/Shanghai'; }
+function mayPublish(account) { return account.authStatus === 20 && account.canPublish !== false; }
+function badge(label, color = 'gray') { return `<span class="badge ${color}"><span></span>${esc(label)}</span>`; }
+function publicationBadge(status) { return badge(...pubStatuses[status]); }
+
+function dateFormat(timestamp, zone = defaultZone()) {
+  if (!timestamp) return '—';
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: zone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(timestamp);
+}
+
+function timeParts(timestamp, zone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+  return Object.fromEntries(formatter.formatToParts(timestamp).map(part => [part.type, part.value]));
+}
+
+function dateInput(timestamp, zone) {
+  const { year, month, day, hour, minute } = timeParts(timestamp, zone);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function toTimestamp(value, zone) {
+  if (!value) throw new Error('请选择预约时间。');
+  const baseline = Date.parse(`${value}Z`);
+  if (!Number.isFinite(baseline)) throw new Error('请选择有效时间。');
+  const offsets = [-86400000, 0, 86400000].map(delta => {
+    const sample = baseline + delta;
+    return Date.parse(`${dateInput(sample, zone)}Z`) - sample;
+  });
+  const candidates = [...new Set(offsets)].map(offset => baseline - offset).filter(candidate => dateInput(candidate, zone) === value);
+  if (!candidates.length) throw new Error('该时区的这个时间不存在，请选择其他时间。');
+  if (candidates.length > 1) throw new Error('此时间遇到夏令时切换，请改选其他时间。');
+  return candidates[0];
+}
+
+function scheduleSuggestion(message, zone) {
+  const explicit = message.match(/(\d{4}-\d\d-\d\d)[ T](\d\d:\d\d)/);
+  if (explicit) return `${explicit[1]}T${explicit[2]}`;
+  const today = dateInput(Date.now(), zone).slice(0, 10);
+  const base = Date.parse(`${today}T00:00Z`);
+  let day = /后天/.test(message) ? 2 : /明天|明早/.test(message) ? 1 : /今天/.test(message) ? 0 : null;
+  const week = message.match(/(下|本)周([一二三四五六日天])/);
+  if (week) {
+    const currentWeekday = (new Date(base).getUTCDay() + 6) % 7;
+    const targetWeekday = '一二三四五六日'.indexOf(week[2] === '天' ? '日' : week[2]);
+    day = targetWeekday - currentWeekday + (week[1] === '下' ? 7 : 0);
+  }
+  const calendar = message.match(/(?:(\d{4})年)?(\d{1,2})月(\d{1,2})[日号]/);
+  let next = day === null ? '' : new Date(base + day * 86400000).toISOString().slice(0, 10);
+  if (calendar) {
+    const year = calendar[1] ?? today.slice(0, 4);
+    next = `${year}-${calendar[2].padStart(2, '0')}-${calendar[3].padStart(2, '0')}`;
+    const timestamp = Date.parse(`${next}T00:00Z`);
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== next) return '';
+  }
+  if (!next) return '';
+  const clock = message.match(/(\d{1,2})\s*(?:[:：](\d{2})|点\s*(\d{1,2})?\s*分?)/);
+  if (!clock && !/明早/.test(message)) return '';
+  let hour = clock ? Number(clock[1]) : 9;
+  const minute = clock ? Number(clock[2] ?? clock[3] ?? 0) : 0;
+  if (/下午|晚上/.test(message) && hour < 12) hour += 12;
+  if (hour > 23 || minute > 59) return '';
+  return `${next}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function suggestedZone(message) {
+  if (/北京时间|中国时间/.test(message)) return 'Asia/Shanghai';
+  return Object.entries(zoneLabels).find(([, label]) => message.includes(label))?.[0] || defaultZone();
+}
+
+function zoneOptions(value) {
+  return Object.entries(zoneLabels).map(([zone, label]) => `<option value="${zone}"${selected(zone, value)}>${label} · ${zone}</option>`).join('');
+}
+
+async function request(path, body, mode = state.mode) {
+  const headers = { 'X-BIAI-Mode': mode };
+  const response = await fetch(`/api/${path}`, body === undefined ? { headers } : {
+    method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const data = await response.json();
+  if (!response.ok) throw Object.assign(new Error(data.error ?? '暂时无法完成操作。'), { status: response.status });
+  return data;
+}
+
+let toastTimer;
+function notify(message) {
+  const toast = document.querySelector('#toast');
+  toast.textContent = message;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 3600);
+}
+
+function navigate() {
+  const hash = location.hash.slice(1).split('/');
+  state.page = Object.hasOwn(pages, hash[0]) ? hash[0] : 'agent';
+  if (state.page === 'tasks' && hash[1]) {
+    state.taskId = hash[1];
+    state.taskTab = 'all';
+    state.taskAccount = '';
+    state.taskSearch = '';
+  }
+  if (state.page === 'accounts' && findAccount(hash[1])) {
+    state.accountId = hash[1];
+    state.accountFilter = '';
+    state.accountSearch = '';
+  }
+  navigation.innerHTML = Object.entries(pages).map(([key, label]) => `<a href="#${key}"${key === state.page ? ' aria-current="page"' : ''}>${icon(key)}<span>${label}</span></a>`).join('');
+  document.querySelector('#breadcrumb').textContent = pages[state.page];
+  if (!state.loaded) return;
+  ({ agent: renderAgent, accounts: renderAccounts, tasks: renderTasks, settings: renderSettings })[state.page]();
+}
+
+function heading(title, subtitle) {
+  return `<div class="page-title"><h1>${title}</h1><p>${subtitle}</p></div>`;
+}
+
+const prompts = [
+  ['accounts', '查询社媒账号', '查看美国区 TikTok 账号', '查询美国区的 TikTok 账号'],
+  ['video', '生成 AI 视频', '从一段描述创建视频', '生成一支 6 秒竖屏的陶瓷马克杯产品视频'],
+  ['clock', '安排作品发布', '预览文案并选择发布时间', '生成一支 6 秒竖屏的陶瓷马克杯产品视频，明早 9 点发到品牌主号']
+];
+
+function renderAgent() {
+  main.innerHTML = `<section class="agent-page">
+    <div class="agent-header"><div>${heading('BIAI Agent', '查询社媒账号、生成视频并安排发布。')}</div><div class="agent-actions"><select id="conversation-history" aria-label="历史对话"></select><button class="button quiet" data-action="new-chat">${icon('plus', 17)} 新对话</button></div></div>
+    ${state.issues.ai ? `<div class="agent-issue" role="status">${esc(state.issues.ai)} <a href="#settings">连接设置</a></div>` : ''}
+    <div class="chat-scroll" id="chat-scroll" aria-live="polite"></div>
+    <div class="composer-wrap"><div id="attached"></div><p id="upload-status" class="field-note" role="status" hidden></p>
+    <input type="file" id="attachment-files" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav" multiple hidden>
+    <form id="composer" class="composer">
+      <button type="button" data-action="upload" class="icon-button attach" title="上传图片、视频或音频" aria-label="添加文件">${icon('link', 21)}</button>
+      <textarea name="message" rows="1" maxlength="2000" aria-label="给 BIAI Agent 发消息" placeholder="${esc(prompts[0][3])}" aria-describedby="composer-tab-hint"></textarea>
+      <span id="composer-tab-hint" class="tab-hint">按 <kbd>Tab</kbd> 填入</span>
+      <button class="send" aria-label="发送消息" title="发送消息">${icon('send', 20)}</button>
+    </form><div class="compose-foot">${state.mode === 'live' ? '真实模式 · 生成和发布需要分别确认。' : '模拟模式 · 可体验生成和发布流程。'}</div></div>
+  </section>`;
+  renderChat();
+  renderAttached();
+  renderConversationHistory();
+}
+
+function renderConversationHistory() {
+  const control = document.querySelector('#conversation-history');
+  if (!control) return;
+  control.innerHTML = '<option value="" disabled>历史对话</option>' + state.history.map(item =>
+    `<option value="${esc(item.id)}">${esc(item.title)} · ${dateFormat(item.updated)}</option>`).join('');
+  control.value = state.conversation?.revision ? state.conversation.id : '';
+  control.disabled = state.historyBusy || state.history.length === 0;
+}
+
+function activateConversation(saved) {
+  state.conversation = saved ? { id: saved.id, revision: saved.revision } : { id: crypto.randomUUID(), revision: 0 };
+  const storedDrafts = new Map((saved?.drafts ?? []).map(draft => [draft.id, draft]));
+  state.chat = (saved?.chat ?? []).map(entry => {
+    if (entry.type === 'generation' && findVideo(entry.id)) return { ...entry, type: 'result', intent: storedDrafts.get(entry.id)?.intent };
+    if (entry.type === 'publication' && state.publications.some(item => item.id === entry.id)) return { ...entry, type: 'confirmed' };
+    return entry;
+  });
+  const draftIds = new Set(state.chat.filter(entry => ['generation', 'publication'].includes(entry.type)).map(entry => entry.id));
+  state.drafts = new Map((saved?.drafts ?? []).filter(draft => draftIds.has(draft.id)).map(draft => [draft.id, draft]));
+  state.attachments = [];
+  sessionStorage.setItem(`biai-conversation-${state.mode}`, saved?.id ?? '');
+}
+
+function flushConversation() {
+  clearTimeout(conversationTimer);
+  conversationSave = conversationSave.then(async () => {
+    if (!conversationDirty || !state.chat.length) return true;
+    conversationDirty = false;
+    const active = state.conversation;
+    const mode = state.mode;
+    const body = { revision: active.revision, chat: state.chat.map(entry => entry.type === 'confirmed' ? { type: entry.type, id: entry.id } : entry),
+      drafts: [...state.drafts.values()] };
+    try {
+      let saved;
+      try {
+        saved = await request(`conversations/${active.id}`, body, mode);
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        saved = await request(`conversations/${crypto.randomUUID()}`, { ...body, revision: 0 }, mode);
+        notify('这段对话在另一个页面有更新，当前内容已另存为一段对话。');
+      }
+      Object.assign(active, { id: saved.id, revision: saved.revision });
+      sessionStorage.setItem(`biai-conversation-${mode}`, saved.id);
+      state.history = [saved, ...state.history.filter(item => item.id !== saved.id)];
+      renderConversationHistory();
+      return true;
+    } catch (error) {
+      conversationDirty = true;
+      notify(`对话暂未保存。${error.message}`);
+      return false;
+    }
+  });
+  return conversationSave;
+}
+
+function saveChat(defer = false) {
+  if (!state.conversation || !state.chat.length) return;
+  conversationDirty = true;
+  if (defer) {
+    clearTimeout(conversationTimer);
+    conversationTimer = setTimeout(() => void flushConversation(), 250);
+  } else void flushConversation();
+}
+
+async function changeConversation(id) {
+  if (state.historyBusy || state.intentBusy || state.formBusy || state.uploadBusy) {
+    renderConversationHistory();
+    notify('请等待当前操作完成后再切换对话。');
+    return;
+  }
+  state.historyBusy = true;
+  renderConversationHistory();
+  try {
+    if (!await flushConversation()) return;
+    activateConversation(id ? await request(`conversations/${id}`) : null);
+    if (state.page === 'agent') renderAgent();
+  } catch (error) { notify(error.message); }
+  finally {
+    state.historyBusy = false;
+    renderConversationHistory();
+  }
+}
+
+function renderAttached() {
+  const box = document.querySelector('#attached');
+  if (box) box.innerHTML = attachmentList(state.attachments, true);
+}
+
+function attachmentList(files, removable = false) {
+  if (!Array.isArray(files) || !files.length) return '';
+  return `<div class="attachment-list">${files.map((file, index) => {
+    const url = `/api/files/${encodeURIComponent(file.id)}`;
+    const image = /\.(jpg|jpeg|png|webp)$/i.test(file.name);
+    const symbol = image ? 'image' : /\.(mp4|mov)$/i.test(file.name) ? 'video' : /\.(mp3|wav)$/i.test(file.name) ? 'audio' : 'link';
+    return `<span class="attachment-chip"><a href="${url}" download><span class="attachment-thumb" aria-hidden="true">${icon(symbol, 18)}${image ? `<img src="${url}/preview" alt="" loading="lazy" decoding="async">` : ''}</span><span>${esc(file.name)}</span></a>${removable ? `<button class="icon-button" type="button" data-action="remove-file" data-index="${index}" aria-label="移除 ${esc(file.name)}">${icon('close', 13)}</button>` : ''}</span>`;
+  }).join('')}</div>`;
+}
+
+function reportUpload(message) {
+  const status = document.querySelector('#upload-status');
+  if (!status) return;
+  status.textContent = message;
+  status.hidden = !message;
+}
+
+async function uploadAttachments(input) {
+  const files = Array.from(input.files);
+  input.value = '';
+  if (!files.length || state.uploadBusy || state.historyBusy) return;
+  if (state.attachments.length + files.length > 9) { reportUpload('每条消息最多添加 9 个文件。'); return; }
+  state.uploadBusy = true;
+  const errors = [];
+  try {
+    for (const file of files) {
+      reportUpload(`正在上传 ${file.name}…`);
+      try {
+        if (!file.size || file.size > 100 * 1024 * 1024) throw new Error('请选择非空且不超过 100 MB 的文件。');
+        const response = await fetch('/api/files', {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) }, body: file
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '上传未完成，请重试。');
+        state.attachments.push(result);
+        renderAttached();
+      } catch (error) { errors.push(`${file.name}：${error.message}`); }
+    }
+    reportUpload(errors.join(' '));
+  } finally { state.uploadBusy = false; }
+}
+
+function renderChat() {
+  const box = document.querySelector('#chat-scroll');
+  if (!box) return;
+  if (!state.chat.length) {
+    box.innerHTML = `<div class="welcome"><div class="agent-symbol">${icon('agent', 30)}</div><h2>今天想做什么？</h2><p>从查找账号到确认发布，在同一个对话里完成。</p><div class="prompt-grid">${prompts.map(([symbol, title, detail, message]) => `<button class="prompt" data-action="prompt" data-message="${esc(message)}"><span class="prompt-icon">${icon(symbol)}</span><strong>${title}</strong><small>${detail}</small>${icon('arrow', 16)}</button>`).join('')}</div>${recentVideos()}</div>`;
+    return;
+  }
+  box.innerHTML = state.chat.map(entry => {
+    if (entry.type === 'user') return `<div class="message user"><div class="bubble">${esc(entry.text)}${attachmentList(entry.files)}</div><div class="avatar user-avatar">${icon('accounts', 17)}</div></div>`;
+    if (entry.type === 'generation') return assistant(renderGenerationDraft(state.drafts.get(entry.id)));
+    if (entry.type === 'result') return assistant(resultCard(entry.id, entry.intent));
+    if (entry.type === 'tasks') return assistant(`<p>最近的发布任务</p><div class="account-cards">${entry.ids.map(id => {
+      const task = state.publications.find(item => item.id === id);
+      return task ? `<a class="account-card" href="#tasks/${id}">${icon('tasks', 17)}<span><strong>${esc(task.title)}</strong><small>${esc(taskAccount(task)?.name)}</small></span>${publicationBadge(task.status)}${icon('arrow', 15)}</a>` : '';
+    }).join('')}</div>`);
+    if (entry.type === 'publication') return assistant(renderPublicationDraft(state.drafts.get(entry.id)));
+    if (entry.type === 'confirmed') {
+      const task = state.publications.find(item => item.id === entry.id);
+      if (!task) return assistant('<p>这条发布任务暂不可查看。</p>');
+      return assistant(`<div class="confirmed"><span class="confirmed-icon">${icon('check')}</span><div><strong>${task.planned ? '已确认排期' : '已确认发布'}</strong><p>${esc(task.title)} · ${esc(taskAccount(task)?.name)}${task.planned ? ` · ${dateFormat(task.planned, task.zone)} ${zoneLabels[task.zone] ?? esc(task.zone)}` : ''}</p></div><a class="button" href="#tasks/${task.id}">查看任务 ${icon('arrow', 15)}</a></div>`);
+    }
+    return assistant(`<p>${esc(entry.text)}</p>${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}`);
+  }).join('') + (state.intentBusy ? assistant('<p class="muted">正在处理你的请求…</p>') : '');
+  box.scrollTop = box.scrollHeight;
+}
+
+function assistant(content) {
+  return `<div class="message assistant"><div class="avatar agent-avatar">${icon('agent', 18)}</div><div class="bubble">${content}</div></div>`;
+}
+
+function accountCards(accounts) {
+  return `<div class="account-cards">${accounts.map(account => `<a class="account-card" href="#accounts/${esc(account.id)}">${platformIcon(account.platform)}<span><strong>${esc(account.name)}</strong><small>${esc(account.platform)} · ${esc(account.country)} · ID ${esc(account.id)}</small></span>${badge(account.authorization, account.authorization === '已授权' ? 'green' : 'orange')}${icon('arrow', 15)}</a>`).join('')}</div>`;
+}
+
+function recentVideos(showMany = false, intent = {}) {
+  const videos = state.generations.slice(0, showMany ? 5 : 2);
+  if (!videos.length) return '';
+  return `<div class="recent"><h3>最近生成</h3>${videos.map(video => `<button class="recent-item" data-action="open-video" data-id="${video.id}" data-intent="${esc(JSON.stringify(intent))}">${icon('video', 17)}<span>${esc(video.parameters.prompt.slice(0, 48))}</span>${generationBadge(video)}${icon('arrow', 15)}</button>`).join('')}</div>`;
+}
+
+function generationBadge(video) {
+  const states = { queued: ['等待生成', 'purple'], submitting: ['正在发送', 'blue'], generating: ['生成中', 'blue'],
+    completed: ['生成完成', 'green'], expired: ['素材已过期', 'red'], failed: ['生成失败', 'red'],
+    review: ['生成服务正在检查', 'orange'], unknown: ['状态待确认', 'orange'] };
+  return badge(...(states[video.status] ?? states.unknown));
+}
+
+function modelName(video) {
+  return state.models.find(model => model.id === video.parameters.model)?.name ?? video.parameters.model;
+}
+
+function videoPreview(video) {
+  return `<div class="media-preview"><video controls playsinline preload="metadata" src="${esc(video.url)}"${video.coverUrl ? ` poster="${esc(video.coverUrl)}"` : ''} aria-label="视频预览"></video><div class="media-meta"><span>${video.mode === 'mock' ? '示例视频' : 'Smart BIAI 生成视频'}</span><a href="${esc(video.url)}" rel="noreferrer" target="_blank">打开视频 ↗</a></div><p class="form-error" data-media-error hidden>浏览器未能加载视频，请检查网络或刷新源链接。</p></div>`;
+}
+
+function platformIcon(platform) {
+  const symbols = { TikTok: '♪', YouTube: '▶', Instagram: '◎' };
+  const known = Object.hasOwn(symbols, platform);
+  return `<span aria-hidden="true" class="platform ${known ? platform.toLowerCase() : ''}">${known ? symbols[platform] : '•'}</span>`;
+}
+
+function renderGenerationDraft(draft) {
+  if (!draft) return '<p>这份生成草稿暂不可查看。</p>';
+  const { id, parameters: p, credits } = draft;
+  const model = state.models.find(item => item.id === p.model);
+  if (!model) return `<p>草稿已保存。当前无法使用这个视频模型，请在<a href="#settings">连接设置</a>检查视频服务。</p><p>${esc(p.prompt)}</p>`;
+  const hasFiles = state.mode === 'live' && draft.files?.length > 0;
+  const storage = state.settings.storage;
+  const localOnly = hasFiles && !storage?.ready;
+  return `<form class="inner-card generation-form" data-form="generation" data-id="${id}">
+    <div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成视频</h3><p>${state.mode === 'live' ? '先查看积分报价，再确认生成。' : '选好视频设置后，可查看模拟报价。'}</p></div></div>
+    <label>视频提示词<textarea name="prompt" rows="2" required maxlength="20000">${esc(p.prompt)}</textarea></label>
+    <div class="fields generation-fields"><label>模型<select name="model">${state.models.map(item => `<option value="${item.id}"${selected(item.id, p.model)}>${item.name}</option>`).join('')}</select></label>
+      <label>画幅<select name="ratio">${model.ratios.map(ratio => `<option${selected(ratio, p.ratio)}>${ratio}</option>`).join('')}</select></label>
+      <label>清晰度<select name="resolution">${model.resolutions.map(value => `<option${selected(value, p.resolution)}>${value}</option>`).join('')}</select></label>
+      <label>时长（秒）${model.durations?.length ? `<select name="duration">${model.durations.map(value => `<option${selected(value, p.duration)}>${value}</option>`).join('')}</select>` : `<input type="number" name="duration" value="${esc(p.duration)}" min="${model.min}" max="${model.max}" required>`}</label></div>
+    <label class="check-field"${model.audio === false ? ' hidden' : ''}><input type="checkbox" name="audio"${p.audio ? ' checked' : ''}> 生成声音</label>
+    ${draft.links.length ? `<p class="field-note">参考链接 ${draft.links.length} 条${state.mode === 'mock' ? '（模拟生成）' : ''}</p>` : ''}
+    ${attachmentList(draft.files)}
+    ${hasFiles ? `<p class="field-note">${localOnly ? '请到连接设置配置本地文件服务器或 OSS，Smart BIAI 才能读取附件。' : storage.provider === 'oss' ? '报价前会把选中的素材上传到 OSS，并提供限时下载链接。' : '报价前会给选中的素材生成限时公网链接。'}</p><button type="button" class="text-button" data-action="without-files">移除参考文件，继续生成</button>` : ''}
+    <div class="card-actions"><span class="quote">${credits != null ? `<strong>${esc(credits)}</strong> ${state.mode === 'live' ? '积分上限' : '模拟积分'}` : '尚未报价'}</span>
+      <button type="submit" class="button ${credits == null ? '' : 'primary'}"${localOnly ? ' disabled' : ''}>${credits == null ? hasFiles ? '准备素材并报价' : '获取报价' : '确认生成'}</button></div>
+    <p class="form-error" role="alert" hidden></p>
+  </form>`;
+}
+
+function resultCard(id, intent = {}) {
+  const video = findVideo(id);
+  if (!video) return `<p>正在读取视频结果…</p>`;
+  return `<div class="inner-card result-card" data-result="${id}"><div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成结果</h3><p>${esc(video.parameters.prompt.slice(0, 78))}</p></div>${generationBadge(video)}</div>
+    ${video.url ? videoPreview(video) : ['generating', 'queued', 'submitting'].includes(video.status) ? '<div class="progress"><i></i></div>' : ''}
+    ${video.error ? `<p class="field-note">${esc(video.error)}</p>` : ''}
+    ${video.status === 'completed' ? `<div class="card-actions"><span class="muted">视频可用至 ${dateFormat(video.expiresAt)}</span>${state.mode === 'live' ? `<button class="button" data-action="refresh-video" data-id="${id}">刷新链接</button>` : ''}<button class="button primary" data-action="draft-publish" data-id="${id}">${intent.publish ? '继续准备发布' : '准备发布'} ${icon('arrow', 15)}</button></div>` : ''}</div>`;
+}
+
+function renderPublicationDraft(draft) {
+  if (!draft) return '<p>这份发布草稿暂不可查看。</p>';
+  const video = findVideo(draft.generationId);
+  const account = findAccount(draft.accountId);
+  const live = state.mode === 'live';
+  return `<form class="inner-card publish-form" data-id="${draft.id}" data-form="publication">
+    <div class="card-header"><span class="card-icon">${icon('tasks')}</span><div><h3>发布确认</h3><p>检查发布账号、标题和时间。</p></div>${badge(live ? '将发布到所选账号' : '待确认', live ? 'orange' : 'purple')}</div>
+    <div class="draft-media">${thumbnail(video?.coverUrl)}<span><strong>已选生成视频</strong><small>视频可用至 ${dateFormat(video?.expiresAt, draft.zone)}</small></span></div>
+    <label>目标账号<select name="accountId" required><option value="">请选择目标账号</option>${state.accounts.filter(mayPublish).map(item => `<option value="${item.id}"${selected(item.id, draft.accountId)}>${esc(item.platform)} · ${esc(item.name)}</option>`).join('')}</select></label>
+    <label><span class="field-heading">发布标题 <button class="text-button" type="button" data-action="fill-title">AI 补齐</button></span><input name="title" maxlength="100" required placeholder="输入发布标题" value="${esc(draft.title)}"></label>
+    <label data-description${account?.platform === 'YouTube' ? '' : ' hidden'}>视频描述<textarea name="description" rows="2" maxlength="1000" placeholder="可选">${esc(draft.description)}</textarea></label>
+    <p class="field-note">封面 · ${video?.coverUrl ? '使用生成服务返回的封面' : '自动使用生成封面，无封面时留空'}</p>
+    <label class="check-field"><input type="checkbox" name="ai"${draft.ai ? ' checked' : ''}> AI 生成内容</label>
+    <fieldset class="mode" aria-label="发布方式"><label><input type="radio" name="mode" value="now"${draft.mode === 'now' ? ' checked' : ''}> 立即发布</label><label><input type="radio" name="mode" value="scheduled"${draft.mode === 'scheduled' ? ' checked' : ''}> 定时发布</label></fieldset>
+    <div class="fields schedule-fields" data-schedule${draft.mode === 'scheduled' ? '' : ' hidden'}><label>预约时间<input type="datetime-local" name="planned" value="${esc(draft.planned)}"></label><label>时区<select name="zone">${zoneOptions(draft.zone)}</select></label></div>
+    <p class="field-note" data-schedule-note${draft.mode === 'scheduled' ? '' : ' hidden'}>请保持工作台运行。到预约时间后，工作台会开始发布。</p>
+    <div class="card-actions"><button class="button primary" data-confirm>${draft.mode === 'scheduled' ? '确认排期' : '确认发布'}</button></div>
+    <p class="form-error" role="alert" hidden></p>
+  </form>`;
+}
+
+function thumbnail(url) {
+  return `<span class="thumbnail">${icon('video', 21)}${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</span>`;
+}
+
+function renderAccounts() {
+  main.innerHTML = `<section class="page">
+    ${heading('社媒账号', '查看已连接的海外社媒账号及其发布作品。')}
+    ${state.issues.social ? `<p class="page-issue">${esc(state.issues.social)} <a href="#settings">连接设置</a></p>` : ''}
+    <div class="account-layout"><div class="panel"><div class="toolbar"><label class="search">${icon('search', 17)}<input id="account-search" aria-label="搜索账号" placeholder="搜索账号名称、别名或 ID" value="${esc(state.accountSearch)}"></label>
+      <select id="account-filter" aria-label="筛选平台"><option value="">全部平台</option>${['TikTok', 'YouTube', 'Instagram'].map(platform => `<option${selected(platform, state.accountFilter)}>${platform}</option>`).join('')}</select></div><div id="account-table"></div></div><aside id="account-detail" class="panel account-detail"></aside></div>
+  </section>`;
+  updateAccounts();
+}
+
+function updateAccounts() {
+  const list = state.accounts.filter(account => (!state.accountFilter || state.accountFilter === account.platform) &&
+    `${account.id} ${account.name} ${account.alias}`.toLowerCase().includes(state.accountSearch.trim().toLowerCase()));
+  const account = list.find(item => item.id === state.accountId) ?? list[0];
+  state.accountId = account?.id ?? '';
+  document.querySelector('#account-table').innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>账号</th><th>平台</th><th>国家</th><th>授权状态</th></tr></thead><tbody>${list.map(item => `<tr${item.id === account.id ? ' class="selected-row"' : ''}><td><button class="row-link" data-action="account" data-id="${item.id}">${platformIcon(item.platform)}<span><strong>${esc(item.name)}</strong><small>${esc(item.alias)}</small></span></button></td><td>${esc(item.platform)}</td><td>${esc(item.country)}</td><td>${badge(item.authorization, item.authorization === '已授权' ? 'green' : 'orange')}</td></tr>`).join('')}</tbody></table></div>` : empty('没有匹配的账号', '试试其他名称、别名或 ID。');
+  const detail = document.querySelector('#account-detail');
+  if (!account) { detail.innerHTML = empty('选择社媒账号', '账号详情会显示在这里。'); return; }
+  const works = state.publications.filter(item => item.accountId === account.id && item.status === 'completed');
+  detail.innerHTML = `<div class="account-summary">${platformIcon(account.platform)}<div><h2>${esc(account.name)}</h2><p>${esc(account.platform)} · 账号 ID ${account.id}</p></div></div>
+    <div class="account-meta"><span>服务到期 <strong>${esc(account.expiry || '—')}</strong></span>${badge(account.authorization, account.authorization === '已授权' ? 'green' : 'orange')}</div>
+    <div class="section-label">本应用发布作品 <span>${works.length}</span></div><p class="field-note">显示通过本应用确认发布成功的作品。</p>
+    ${works.length ? `<div class="works">${works.map(item => `<div class="work-row">${thumbnail(item.coverUrl || findVideo(item.generationId)?.coverUrl)}<div><strong>${esc(item.title)}</strong><small>完成于 ${dateFormat(item.updated, item.zone)}</small></div><a href="#tasks/${item.id}" class="text-button">查看任务</a></div>`).join('')}</div>` : empty('尚无发布作品', '发布完成后会在此显示。', 'video')}`;
+}
+
+function empty(title, detail, symbol = 'search') {
+  return `<div class="empty"><span class="card-icon">${icon(symbol, 22)}</span><strong>${title}</strong><p>${detail}</p></div>`;
+}
+
+const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '生成记录' };
+
+function renderTasks() {
+  main.innerHTML = `<section class="page">
+    ${heading('发布任务', '查看预约时间和发布结果。')}
+    <div class="tasks-layout"><div class="panel task-panel"><div class="tabs" aria-label="筛选任务">${Object.entries(tabs).map(([key, label]) => `<button data-action="task-tab" data-tab="${key}" aria-pressed="${key === state.taskTab}">${label}</button>`).join('')}</div>
+    <div class="toolbar"${state.taskTab === 'generation' ? ' hidden' : ''}><label class="search">${icon('search', 17)}<input id="task-search" aria-label="搜索作品标题" placeholder="搜索作品标题" value="${esc(state.taskSearch)}"></label>
+    <select id="task-account" aria-label="筛选目标账号"><option value="">全部账号</option>${state.accounts.map(item => `<option value="${item.id}"${selected(item.id, state.taskAccount)}>${esc(item.name)}</option>`).join('')}</select></div><div id="task-table"></div></div><aside id="task-detail" class="panel task-detail" hidden></aside></div>
+  </section>`;
+  updateTasks();
+}
+
+function updateTasks() {
+  const detail = document.querySelector('#task-detail');
+  if (!detail) return;
+  const table = document.querySelector('#task-table');
+  if (state.taskTab === 'generation') {
+    detail.hidden = true;
+    table.innerHTML = state.generations.length ? `<div class="table-wrap"><table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.generations.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${esc(video.parameters.duration)} 秒</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}</td><td><button class="text-button" data-action="preview-video" data-id="${video.id}">查看视频</button></td></tr>`).join('')}</tbody></table></div>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video');
+    return;
+  }
+  const rows = state.publications.filter(item => (state.taskTab === 'all' || item.status === state.taskTab || state.taskTab === 'publishing' && ['queued', 'queued_upstream', 'submitting'].includes(item.status)) &&
+    (!state.taskAccount || item.accountId === state.taskAccount) && item.title.toLowerCase().includes(state.taskSearch.trim().toLowerCase()));
+  table.innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>作品</th><th>目标账号</th><th>预约时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${rows.map(item => {
+    const account = taskAccount(item);
+    return `<tr${state.taskId === item.id ? ' class="selected-row"' : ''}><td><div class="task-work">${thumbnail(item.coverUrl || findVideo(item.generationId)?.coverUrl)}<strong>${esc(item.title)}</strong></div></td><td>${platformIcon(account?.platform)} ${esc(account?.name ?? item.accountId)}</td><td>${item.planned ? `${dateFormat(item.planned, item.zone)}<small>${zoneLabels[item.zone] || esc(item.zone)}</small>` : '立即'}</td><td>${publicationBadge(item.status)}</td><td><button class="text-button" data-action="task" data-id="${item.id}">详情</button></td></tr>`;
+  }).join('')}</tbody></table></div>` : empty('没有符合条件的发布任务', '确认发布后，可以在这里查看进度。', 'tasks');
+  const active = rows.find(item => item.id === state.taskId);
+  detail.hidden = !active;
+  if (active) detail.innerHTML = renderTaskDetail(active);
+}
+
+function renderTaskDetail(item) {
+  const account = taskAccount(item);
+  const video = findVideo(item.generationId);
+  const events = [
+    ['创建发布任务', item.created],
+    [item.planned ? '预约时间' : '等等待发布', item.planned],
+    ...(item.submitted ? [[item.mode === 'live' ? '已发送给 Smart BIAI' : '模拟发布已开始', item.submitted]] : []),
+    ...(['completed', 'missed', 'expired', 'canceled', 'failed'].includes(item.status) ? [[pubStatuses[item.status][0], item.updated]] : [])
+  ];
+  return `<div class="detail-title"><h2>任务详情</h2><button class="icon-button" data-action="close-task" aria-label="关闭任务详情">${icon('close', 19)}</button></div>
+    <div class="task-work detail-work">${thumbnail(item.coverUrl || video?.coverUrl)}<strong>${esc(item.title)}</strong></div>
+    <dl class="details"><div><dt>目标账号</dt><dd>${esc(account?.platform)} · ${esc(account?.name ?? item.accountId)}</dd></div><div><dt>状态</dt><dd>${publicationBadge(item.status)}</dd></div><div><dt>发布时间</dt><dd>${item.planned ? `${dateFormat(item.planned, item.zone)} · ${esc(zoneLabels[item.zone] || item.zone)}` : '立即发布'}</dd></div><div><dt>更新时间</dt><dd>${dateFormat(item.updated, item.zone)}</dd></div>${item.sourceTaskId ? `<div><dt>Smart BIAI 任务编号</dt><dd class="break">${esc(item.sourceTaskId)}</dd></div>` : ''}${item.materialId ? `<div><dt>视频编号</dt><dd class="break">${esc(item.materialId)}</dd></div>` : ''}</dl>
+    ${item.error ? `<p class="form-error">${esc(item.error)}</p>` : ''}
+    <h3 class="timeline-title">进度记录</h3><ol class="timeline">${events.map(([label, time]) => `<li><strong>${label}</strong><small>${time ? dateFormat(time, item.zone) : '待处理'}</small></li>`).join('')}</ol>
+    <div class="detail-actions">${video?.url ? `<a class="text-button" href="${esc(video.url)}" target="_blank" rel="noreferrer">打开源视频 ↗</a>` : ''}${item.status === 'scheduled' ? `<button class="button danger" data-action="cancel" data-id="${item.id}">取消排期</button>` : ''}</div>`;
+}
+
+function settingsCard(name, symbol, title, detail, fields) {
+  const config = state.settings[name];
+  const problem = state.issues[name];
+  return `<form class="panel settings-card" data-form="settings" data-name="${name}"><span class="card-icon">${icon(symbol, 22)}</span><h2>${title}</h2><p>${detail}</p>${fields}
+    ${name === 'ai' ? '' : '<a class="text-button official" href="https://www.biaibiai.com/" target="_blank" rel="noreferrer">去 Smart BIAI 获取连接信息 ↗</a>'}
+    ${problem ? `<p class="field-note">${esc(problem)}</p>` : ''}
+    <p class="form-error" role="alert" hidden></p><div class="settings-actions">${config.ready ? badge(config.source === 'env' ? '已从本地文件或环境读取' : '已保存', 'purple') : badge('还未设置')}<button class="button" type="submit">保存</button></div>
+    ${config.hasSavedSecret ? '<button class="text-button clear-secret" type="button" data-action="clear-secret">清除已保存密钥</button>' : ''}</form>`;
+}
+
+function secret(name, hasSecret, label) {
+  return `<label>${label}<input type="password" name="${name}" maxlength="4096" autocomplete="new-password" placeholder="${hasSecret ? '留空可保留当前密钥' : '输入密钥'}"></label>`;
+}
+
+function renderStorageSettings(config) {
+  const local = config.provider === 'local';
+  const field = (name, label, placeholder) => `<label>${label}<input name="${name}" value="${esc(config[name])}" placeholder="${placeholder}"></label>`;
+  const localFields = `${field('publicOrigin', '公网 HTTPS 域名', 'https://media.example.com')}${field('localDirectory', '服务器附件目录', '留空使用默认目录')}`;
+  const ossFields = `${field('bucket', 'Bucket', '填写 Bucket 名称')}${field('region', '地域', '例如 cn-hangzhou')}${field('endpoint', 'Endpoint（选填）', '留空按地域确定')}${field('customDomain', '下载自定义域名（选填）', '留空用 OSS 公网域名')}${field('prefix', '对象目录（选填）', 'biai-agent/references')}${secret('accessKeyId', config.hasAccessKeyId, 'AccessKey ID')}${secret('accessKeySecret', config.hasSecret, 'AccessKey Secret')}`;
+  return `<form class="panel settings-card storage-settings" data-form="settings" data-name="storage">
+    <span class="card-icon">${icon('link', 22)}</span><h2>参考素材文件服务</h2><p>让 Smart BIAI 能读取你从对话上传的参考素材。</p>
+    <fieldset class="mode" aria-label="文件服务"><label><input type="radio" name="provider" value="local"${local ? ' checked' : ''}> 本地文件服务器</label><label><input type="radio" name="provider" value="oss"${local ? '' : ' checked'}> 阿里云 OSS</label></fieldset>
+    <fieldset class="storage-fields" data-storage="local"${local ? '' : ' hidden disabled'}>${localFields}<p class="field-note">需要将域名的 /media/ 转发到工作台。更换附件目录只影响新上传的文件。</p></fieldset>
+    <fieldset class="storage-fields" data-storage="oss"${local ? ' hidden disabled' : ''}>${ossFields}<p class="field-note">可读取配置文件中的 OSS 信息，密钥留空保留当前值。</p></fieldset>
+    <p class="form-error" role="alert" hidden></p><div class="settings-actions">${badge(config.ready ? '已填写' : '还未设置', config.ready ? 'purple' : 'gray')}<button type="submit" class="button">保存</button></div>
+  </form>`;
+}
+
+function renderSettings() {
+  const { social, video, ai, storage } = state.settings;
+  const provider = ai.provider || 'deepseek';
+  main.innerHTML = `<section class="page">${heading('连接设置', '连接 Smart BIAI，并选择 Agent 使用的 AI 服务。')}
+    <div class="settings-grid">
+    ${settingsCard('social', 'accounts', 'Smart BIAI 社媒', '查看已连接的社媒账号并发布视频。', `<label>App ID<input name="appId" required maxlength="160" value="${esc(social.appId)}" placeholder="输入 Smart BIAI App ID"></label>${secret('accessToken', social.hasSecret, 'Access Token')}`)}
+    ${settingsCard('video', 'video', 'Smart BIAI 视频生成', '在工作台生成和预览视频。', secret('apiKey', video.hasSecret, 'API Key'))}
+    ${settingsCard('ai', 'agent', '对话 AI', '选择帮你理解指令和撰写文案的 AI。', `<fieldset class="mode" aria-label="对话模型服务"><label><input type="radio" name="provider" value="deepseek"${provider === 'deepseek' ? ' checked' : ''}> DeepSeek</label><label><input type="radio" name="provider" value="doubao"${provider === 'doubao' ? ' checked' : ''}> 豆包</label></fieldset><label>模型 ID<input name="model" required maxlength="160" value="${esc(ai.model)}" placeholder="填入账号已开通的模型 ID"></label>${secret('apiKey', ai.hasSecret, 'API Key')}`)}
+    </div>${renderStorageSettings(storage)}<form class="panel timezone-card" data-form="settings" data-name="preferences"><div><h2>默认时区</h2><p>新建预约时会默认使用这个时区。</p></div><label class="sr-only" for="zone-setting">默认时区</label><select id="zone-setting" name="zone">${zoneOptions(defaultZone())}</select><button class="button" type="submit">保存</button><p class="form-error" role="alert" hidden></p></form>
+  </section>`;
+}
+
+function textEntry(text, details = {}) { state.chat.push({ type: 'text', text, ...details }); }
+
+async function sendMessage(message) {
+  const value = message.trim();
+  if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy) return;
+  const chat = state.chat;
+  const history = chat.filter(entry => entry.type === 'user').slice(-5).map(entry => entry.text);
+  const files = state.attachments.splice(0);
+  chat.push({ type: 'user', text: value, ...(files.length ? { files } : {}) });
+  if (!value) textEntry('文件已保存到工作台。');
+  saveChat();
+  state.intentBusy = Boolean(value);
+  renderAttached();
+  renderChat();
+  if (!value) return;
+  try {
+    const intent = await request('agent', { message: value, history });
+    if (state.chat !== chat) return;
+    intent.zone = suggestedZone(value);
+    intent.planned = scheduleSuggestion(value, intent.zone);
+    if (intent.publish && (intent.planned || /定时|排期|预约|明早|明天|后天|(?:本|下)周/.test(value))) intent.requiresSchedule = true;
+    if (intent.accounts?.length && state.mode === 'live') for (const account of intent.accounts) upsert(state.accounts, account);
+    if (intent.accountError) textEntry(intent.accountError);
+    if (intent.query && !intent.accountError) textEntry(intent.accounts.length ? `找到 ${intent.accounts.length} 个匹配账号。${intent.limited ? '已查前 500 个账号，可用账号 ID 缩小范围。' : ''}` : '没有找到匹配账号，可以换一个平台或名称。', { accounts: intent.accounts });
+    if (intent.generate) {
+      const id = crypto.randomUUID();
+      const model = state.models[0];
+      if (!model) { textEntry(state.issues.video || '当前没有可用的视频模型，请检查连接设置。'); return; }
+      const prompt = intent.prompt || value.split(/[，,。；;]\s*(?=明|今|后|下周|发|定时|排期)/)[0];
+      const ratio = model.ratios.includes(intent.ratio) ? intent.ratio : model.ratios.includes('9:16') ? '9:16' : model.ratios[0];
+      const seconds = Math.max(model.min, Math.min(model.max, intent.duration ?? 6));
+      const duration = model.durations?.length && !model.durations.includes(seconds) ? model.durations[0] : seconds;
+      const resolution = model.resolutions.includes('720p') ? '720p' : model.resolutions[0];
+      state.drafts.set(id, { id, parameters: { prompt, model: model.id, ratio, resolution, duration, audio: false }, links: [], files, intent });
+      chat.push({ type: 'generation', id });
+    } else if (intent.taskQuery) {
+      const tasks = await request('publications');
+      if (state.chat !== chat) return;
+      state.publications = tasks;
+      const matching = tasks.filter(task => !intent.targetId || task.accountId === intent.targetId).slice(0, 5);
+      if (matching.length) chat.push({ type: 'tasks', ids: matching.map(task => task.id) });
+      else textEntry('还没有匹配的发布任务。');
+    } else if (intent.publish) {
+      if (state.generations.length) textEntry('选一个已生成的视频，我会准备发布草稿。', { videos: true, intent });
+      else textEntry('先生成一个视频，再准备发布。可以输入「生成一支 6 秒的竖屏产品视频」。');
+    } else if (!intent.query) {
+      textEntry(intent.message || '试试「查询 TikTok 账号」、「生成一支竖屏产品视频」或「把视频发到品牌主号」。');
+    }
+  } catch (error) {
+    if (state.chat === chat) textEntry(error.message);
+  } finally {
+    state.intentBusy = false;
+    saveChat();
+    renderChat();
+  }
+}
+
+function offerVideo(id, intent = {}) {
+  state.chat.push({ type: 'result', id, intent });
+  saveChat();
+  if (state.page !== 'agent') location.hash = '#agent';
+  else renderChat();
+}
+
+function draftPublication(id, intent) {
+  const video = findVideo(id);
+  if (video?.status !== 'completed') { notify('请使用已生成且未过期的素材。'); return; }
+  if (state.mode === 'live' && !state.accounts.some(mayPublish)) { notify(state.issues.social || '当前没有可用的目标账号。'); return; }
+  const key = crypto.randomUUID();
+  const zone = intent.zone ?? defaultZone();
+  state.drafts.set(key, {
+    id: key, generationId: id, accountId: intent.targetId ?? '', title: intent.title ?? '', description: intent.description ?? '',
+    ai: true, mode: intent.requiresSchedule ? 'scheduled' : 'now',
+    zone, planned: intent.planned ?? ''
+  });
+  state.chat.push({ type: 'publication', id: key });
+  saveChat();
+  renderChat();
+}
+
+function upsert(list, entry) {
+  const index = list.findIndex(item => item.id === entry.id);
+  if (index === -1) list.unshift(entry);
+  else list[index] = entry;
+}
+
+function generationFormData(form) {
+  const values = new FormData(form);
+  const draft = state.drafts.get(form.dataset.id);
+  return { prompt: values.get('prompt'), model: values.get('model'), ratio: values.get('ratio'),
+    resolution: values.get('resolution'), duration: Number(values.get('duration')), audio: values.has('audio'),
+    ...(state.mode === 'live' ? { references: draft.links, fileIds: (draft.files ?? []).map(file => file.id) } : {}) };
+}
+
+function changeDraft(form, target) {
+  const draft = state.drafts.get(form.dataset.id);
+  if (!draft) return;
+  if (form.dataset.form === 'generation') {
+    draft.parameters = generationFormData(form);
+    draft.credits = null;
+    form.querySelector('.quote').textContent = '尚未报价';
+    const button = form.querySelector('button[type="submit"]');
+    button.classList.remove('primary');
+    button.textContent = state.mode === 'live' && draft.files?.length ? '准备素材并报价' : '获取报价';
+    if (target.name === 'model') {
+      const model = state.models.find(item => item.id === target.value);
+      const { parameters } = draft;
+      if (!model.ratios.includes(parameters.ratio)) parameters.ratio = model.ratios[0];
+      if (!model.resolutions.includes(parameters.resolution)) parameters.resolution = model.resolutions[0];
+      parameters.duration = Math.max(model.min, Math.min(model.max, parameters.duration || model.min));
+      if (model.durations?.length && !model.durations.includes(parameters.duration)) parameters.duration = model.durations[0];
+      if (model.audio === false) parameters.audio = false;
+      form.outerHTML = renderGenerationDraft(draft);
+      document.querySelector(`[data-id="${draft.id}"] [name="model"]`)?.focus();
+    }
+  } else {
+    const values = new FormData(form);
+    Object.assign(draft, Object.fromEntries(values), { ai: values.has('ai') });
+    form.querySelector('[data-description]').hidden = findAccount(draft.accountId)?.platform !== 'YouTube';
+    const scheduled = draft.mode === 'scheduled';
+    form.querySelector('[data-schedule]').hidden = !scheduled;
+    form.querySelector('[data-schedule-note]').hidden = !scheduled;
+    form.querySelector('[data-confirm]').textContent = scheduled ? '确认排期' : '确认发布';
+  }
+  saveChat(true);
+}
+
+function setFormError(form, message = '') {
+  const field = form.querySelector('.form-error');
+  field.textContent = message;
+  field.hidden = !message;
+}
+
+async function submitForm(form, clearSecret = false) {
+  if (form.dataset.pending || state.historyBusy) return;
+  if (form.dataset.form === 'generation' && state.mode === 'live' && state.drafts.get(form.dataset.id)?.files?.length && !state.settings.storage?.ready) return;
+  form.dataset.pending = 'true';
+  state.formBusy += 1;
+  const button = form.querySelector('button[type="submit"], [data-confirm]');
+  const controls = Array.from(form.elements).filter(control => !control.disabled && control !== button);
+  const values = Object.fromEntries(new FormData(form));
+  const kind = form.dataset.form;
+  const draft = state.drafts.get(form.dataset.id);
+  const parameters = kind === 'generation' ? generationFormData(form) : null;
+  setFormError(form);
+  button.disabled = true;
+  controls.forEach(control => { control.disabled = true; });
+  try {
+    if (kind === 'generation') {
+      if (draft.credits == null) {
+        const quoted = await request('quote', { ...parameters, id: draft.id });
+        Object.assign(draft, quoted);
+        form.outerHTML = renderGenerationDraft(draft);
+      } else {
+        const video = await request('generations', { ...parameters, id: draft.id, credits: draft.credits });
+        upsert(state.generations, video);
+        const index = state.chat.findIndex(entry => entry.id === draft.id && entry.type === 'generation');
+        if (index >= 0) state.chat[index] = { type: 'result', id: video.id, intent: draft.intent };
+        state.drafts.delete(draft.id);
+        renderChat();
+      }
+      saveChat();
+    } else if (kind === 'publication') {
+      const zone = values.zone;
+      const planned = values.mode === 'scheduled' ? toTimestamp(values.planned, zone) : null;
+      const task = await request('publications', { ...values, id: draft.id, generationId: draft.generationId, zone, planned, ai: Boolean(values.ai) });
+      upsert(state.publications, task);
+      const index = state.chat.findIndex(entry => entry.id === draft.id && entry.type === 'publication');
+      if (index >= 0) state.chat[index] = { id: task.id, type: 'confirmed' };
+      state.drafts.delete(draft.id);
+      saveChat();
+      renderChat();
+      notify(planned ? '已保存发布排期。' : '已安排立即发布，可在发布任务中查看进度。');
+    } else {
+      const name = form.dataset.name;
+      state.settings[name] = await request(`settings/${name}`, { ...values, clearSecret });
+      if (state.mode === 'live' && !['preferences', 'storage'].includes(name)) {
+        const updated = await request('bootstrap');
+        Object.assign(state, updated);
+      }
+      if (state.page === 'settings') {
+        const other = Array.from(main.querySelectorAll('[data-form="settings"]')).filter(item => item !== form)
+          .map(item => [item.dataset.name, item]);
+        renderSettings();
+        for (const [key, item] of other) main.querySelector(`[data-name="${key}"]`)?.replaceWith(item);
+      }
+      notify(clearSecret ? '已清除保存的密钥。' : '设置已保存。');
+    }
+  } catch (error) {
+    if (kind === 'generation' && state.mode === 'live' && error.status === 409 && /报价/.test(error.message)) {
+      draft.credits = null;
+      form.querySelector('.quote').textContent = '尚未报价';
+      button.textContent = draft.files?.length ? '准备素材并报价' : '获取报价';
+      button.classList.remove('primary');
+      saveChat();
+    }
+    setFormError(form, error.message);
+  } finally {
+    state.formBusy -= 1;
+    delete form.dataset.pending;
+    button.disabled = false;
+    controls.forEach(control => { control.disabled = false; });
+  }
+}
+
+main.addEventListener('submit', event => {
+  event.preventDefault();
+  const form = event.target;
+  if (form.id === 'composer') {
+    const field = form.elements.message;
+    const value = field.value.trim();
+    if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy) return;
+    field.value = '';
+    void sendMessage(value);
+    return;
+  }
+  if (form.dataset.form) void submitForm(form);
+});
+
+main.addEventListener('keydown', event => {
+  const input = event.target;
+  if (input.form?.id !== 'composer' || input.name !== 'message' || event.isComposing || event.keyCode === 229) return;
+  if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && !input.value && input.placeholder) {
+    event.preventDefault();
+    input.value = input.placeholder;
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    input.form.requestSubmit();
+  }
+});
+
+function handleMediaError(event) {
+  if (event.target instanceof HTMLVideoElement) {
+    const hint = event.target.parentElement.querySelector('[data-media-error]');
+    if (hint) hint.hidden = false;
+  } else if (event.target instanceof HTMLImageElement && event.target.closest('.thumbnail, .attachment-thumb')) {
+    event.target.hidden = true;
+  }
+}
+main.addEventListener('error', handleMediaError, true);
+videoDialog.addEventListener('error', handleMediaError, true);
+
+function renderVideoDialog(video) {
+  const activeUrl = videoDialog.querySelector('video')?.getAttribute('src');
+  if (activeUrl && activeUrl === video.url) return;
+  videoDialog.innerHTML = `<div class="detail-title"><h2 id="video-dialog-title">视频预览</h2><form method="dialog"><button class="icon-button" aria-label="关闭视频预览" autofocus>${icon('close')}</button></form></div>
+    <div class="video-dialog-info"><span>${esc(modelName(video))} · ${esc(video.parameters.duration)} 秒</span>${generationBadge(video)}</div>
+    ${video.url ? videoPreview(video) : `<p class="empty-note">${esc(video.error || (video.status === 'completed' ? '视频链接已失效，请刷新链接。' : '当前暂无可播放的视频。'))}</p>`}
+    ${video.mode === 'live' && video.status === 'completed' ? `<button type="button" class="button" data-refresh-preview>刷新链接</button>` : ''}`;
+}
+
+async function refreshDialogVideo() {
+  const id = videoDialog.dataset.videoId;
+  const mode = state.mode;
+  const button = videoDialog.querySelector('[data-refresh-preview]');
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  try {
+    const video = await request(`generations/${id}/refresh`, {}, mode);
+    if (state.mode !== mode) return;
+    upsert(state.generations, video);
+    if (videoDialog.open && videoDialog.dataset.videoId === id) renderVideoDialog(video);
+  } catch (error) { notify(error.message); }
+  finally { button.disabled = false; }
+}
+
+videoDialog.addEventListener('click', event => {
+  if (event.target.closest('[data-refresh-preview]')) void refreshDialogVideo();
+});
+videoDialog.addEventListener('close', () => {
+  if (videoDialog.open) return;
+  videoDialog.replaceChildren();
+  delete videoDialog.dataset.videoId;
+});
+
+main.addEventListener('input', event => {
+  const { target } = event;
+  if (target.id === 'account-search') { state.accountSearch = target.value; updateAccounts(); }
+  if (target.id === 'task-search') { state.taskSearch = target.value; updateTasks(); }
+  if (target.form?.dataset.id && target.tagName !== 'SELECT' && !['checkbox', 'radio'].includes(target.type)) changeDraft(target.form, target);
+});
+
+main.addEventListener('change', event => {
+  const { target } = event;
+  if (target.id === 'attachment-files') void uploadAttachments(target);
+  if (target.id === 'conversation-history' && target.value) void changeConversation(target.value);
+  if (target.id === 'account-filter') { state.accountFilter = target.value; updateAccounts(); }
+  if (target.id === 'task-account') { state.taskAccount = target.value; updateTasks(); }
+  if (target.form?.dataset.id) changeDraft(target.form, target);
+  if (target.name === 'provider') {
+    if (target.form.dataset.name === 'storage') {
+      for (const fields of target.form.querySelectorAll('[data-storage]')) fields.hidden = fields.disabled = fields.dataset.storage !== target.value;
+      return;
+    }
+    target.form.elements.model.value = target.value === state.settings.ai.provider ? state.settings.ai.model || '' : '';
+    target.form.elements.apiKey.value = '';
+    target.form.elements.apiKey.placeholder = target.value === state.settings.ai.provider && state.settings.ai.hasSecret ? '留空可保留当前密钥' : '输入密钥';
+  }
+});
+
+main.addEventListener('click', async event => {
+  const control = event.target.closest('[data-action]');
+  if (!control || state.historyBusy) return;
+  const { action, id } = control.dataset;
+  switch (action) {
+    case 'prompt': void sendMessage(control.dataset.message); break;
+    case 'new-chat': void changeConversation(); break;
+    case 'upload': if (!state.uploadBusy) document.querySelector('#attachment-files').click(); break;
+    case 'remove-file': state.attachments.splice(Number(control.dataset.index), 1); renderAttached(); break;
+    case 'without-files': {
+      const draft = state.drafts.get(control.form.dataset.id);
+      draft.files = [];
+      draft.credits = null;
+      control.form.outerHTML = renderGenerationDraft(draft);
+      saveChat();
+      break;
+    }
+    case 'open-video': offerVideo(id, JSON.parse(control.dataset.intent || '{}')); break;
+    case 'preview-video': {
+      const video = findVideo(id);
+      if (!video) break;
+      videoDialog.dataset.videoId = id;
+      renderVideoDialog(video);
+      videoDialog.showModal();
+      if (!video.url) void refreshDialogVideo();
+      break;
+    }
+    case 'refresh-video': {
+      control.disabled = true;
+      const mode = state.mode;
+      try {
+        const video = await request(`generations/${id}/refresh`, {}, mode);
+        if (state.mode !== mode) break;
+        upsert(state.generations, video);
+        renderChat();
+      } catch (error) { notify(error.message); }
+      finally { control.disabled = false; }
+      break;
+    }
+    case 'draft-publish': {
+      const mode = state.mode;
+      if (mode === 'live' && !findVideo(id)?.url) {
+        control.disabled = true;
+        try {
+          const refreshed = await request(`generations/${id}/refresh`, {}, mode);
+          if (state.mode !== mode) break;
+          upsert(state.generations, refreshed);
+          if (!refreshed.url) { notify('尚未获得可用的视频链接。'); break; }
+        } catch (error) { notify(error.message); break; }
+        finally { control.disabled = false; }
+      }
+      draftPublication(id, state.chat.findLast(item => item.type === 'result' && item.id === id)?.intent ?? {});
+      break;
+    }
+    case 'fill-title': {
+      const form = control.form;
+      const draft = state.drafts.get(form.dataset.id);
+      const video = findVideo(draft.generationId);
+      if (state.mode === 'live') {
+        control.disabled = true;
+        setFormError(form);
+        try {
+          const suggestion = await request('copywriting', { generationId: draft.generationId });
+          if (!form.isConnected) break;
+          if (suggestion.title) form.elements.title.value = suggestion.title;
+          if (suggestion.description && !form.elements.description.value) form.elements.description.value = suggestion.description;
+        } catch (error) { setFormError(form, error.message); }
+        finally { control.disabled = false; }
+      } else {
+        const subject = video.parameters.prompt.match(/陶瓷马克杯|[「“]([^」”]+)[」”]/)?.[0]?.replace(/[「“」”]/g, '');
+        form.elements.title.value = subject ? `新品上架｜${subject}使用场景` : `新品上架｜${video.parameters.prompt.replace(/^生成|^制作/, '').trim().slice(0, 32)}`;
+        if (findAccount(form.elements.accountId.value)?.platform === 'YouTube' && !form.elements.description.value) {
+          form.elements.description.value = `通过这支短片了解${subject || '产品'}，欢迎留言交流。`;
+        }
+      }
+      changeDraft(form, form.elements.title);
+      break;
+    }
+    case 'account': state.accountId = id; updateAccounts(); break;
+    case 'task-tab': state.taskTab = control.dataset.tab; state.taskId = ''; renderTasks(); break;
+    case 'task': state.taskId = id; updateTasks(); break;
+    case 'close-task': state.taskId = ''; updateTasks(); break;
+    case 'cancel':
+      if (!window.confirm('取消这条发布排期？')) break;
+      control.disabled = true;
+      try {
+        upsert(state.publications, await request(`publications/${id}/cancel`, {}));
+        updateTasks();
+        notify('已取消排期。');
+      } catch (error) { notify(error.message); control.disabled = false; }
+      break;
+    case 'clear-secret':
+      if (window.confirm('清除此服务保存的密钥？')) void submitForm(control.form, true);
+      break;
+  }
+});
+
+async function sync() {
+  const mode = state.mode;
+  const [generations, publications] = await Promise.all([request('generations', undefined, mode), request('publications', undefined, mode)]);
+  if (mode !== state.mode) return;
+  const videoChanges = generations.filter(next => {
+    const prior = findVideo(next.id);
+    return !prior || prior.status !== next.status || prior.url !== next.url || prior.error !== next.error;
+  });
+  const tasksChanged = JSON.stringify(publications) !== JSON.stringify(state.publications);
+  state.generations = generations;
+  state.publications = publications;
+  if (videoDialog.open) {
+    const preview = videoChanges.find(video => video.id === videoDialog.dataset.videoId);
+    if (preview) renderVideoDialog(preview);
+  }
+  if (state.page === 'tasks' && (tasksChanged || videoChanges.length)) updateTasks();
+  if (state.page === 'accounts' && tasksChanged && document.querySelector('#account-table')) updateAccounts();
+  if (state.page === 'agent' && videoChanges.length) {
+    if (!state.chat.length) { renderChat(); return; }
+    for (const video of videoChanges) {
+      const entries = state.chat.filter(entry => entry.type === 'result' && entry.id === video.id);
+      const cards = main.querySelectorAll(`[data-result="${video.id}"]`);
+      cards.forEach((card, index) => { card.outerHTML = resultCard(video.id, entries[index]?.intent); });
+      if (cards.length) document.querySelector('#chat-scroll')?.scrollTo(0, document.querySelector('#chat-scroll').scrollHeight);
+    }
+  }
+}
+
+window.addEventListener('hashchange', navigate);
+async function loadMode() {
+  modeSelect.disabled = true;
+  modeSelect.value = state.mode;
+  modeSelect.dataset.live = String(state.mode === 'live');
+  state.loaded = false;
+  navigate();
+  main.innerHTML = '<p class="loading">正在打开工作台…</p>';
+  try {
+    const [boot, conversations] = await Promise.all([request('bootstrap'), request('conversations'), sync()]);
+    Object.assign(state, boot);
+    state.history = conversations;
+    const remembered = sessionStorage.getItem(`biai-conversation-${state.mode}`);
+    const active = remembered === null ? conversations[0] : conversations.find(item => item.id === remembered);
+    activateConversation(active ? await request(`conversations/${active.id}`) : null);
+    state.loaded = true;
+    navigate();
+  } catch (error) {
+    main.innerHTML = `<section class="page">${empty('工作台连接失败', `${esc(error.message)} 请确认工作台服务已启动，再刷新页面。`)}</section>`;
+  } finally { modeSelect.disabled = false; }
+}
+
+modeSelect.addEventListener('change', async () => {
+  const nextMode = modeSelect.value;
+  if (state.intentBusy || state.formBusy || state.historyBusy || state.uploadBusy) {
+    modeSelect.value = state.mode;
+    notify('请等待当前请求完成后再切换。');
+    return;
+  }
+  state.historyBusy = true;
+  if (!await flushConversation()) {
+    modeSelect.value = state.mode;
+    state.historyBusy = false;
+    return;
+  }
+  state.mode = nextMode;
+  sessionStorage.setItem('biai-mode', state.mode);
+  Object.assign(state, { chat: [], drafts: new Map(), history: [], conversation: null, generations: [], publications: [], accounts: [], attachments: [], accountId: '', taskId: '', taskTab: 'all' });
+  await loadMode();
+  state.historyBusy = false;
+  renderConversationHistory();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && conversationDirty) void flushConversation();
+});
+
+await loadMode();
+const poll = async () => {
+  if (state.loaded) try { await sync(); } catch { /* The next poll will reconnect to the local server. */ }
+  setTimeout(poll, 1000);
+};
+setTimeout(poll, 1000);

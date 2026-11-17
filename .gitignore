@@ -1,0 +1,17 @@
+node_modules/
+.data/
+uploads/
+*.sqlite
+*.sqlite-*
+.credentials-key
+.media-link-key
+.env
+.env.*
+!/doc/.env.example
+
+# Local references and design materials pending publication review.
+/doc/SmartBIAI接口文档-内部Claw对接.md
+/doc/DEEPSEEK_DOUBAO_API_INTEGRATION.md
+/doc/产品说明.md
+/doc/设计与实现方案.md
+/doc/design/
