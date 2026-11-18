@@ -29,15 +29,28 @@ export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now 
     for (const video of data.generations) {
       if (video.status === 'generating' && time >= video.created + generationDelay) {
         Object.assign(video, generationResult(video.id, video.created + generationDelay), { status: 'completed' });
-        if (sampleVideo) Object.assign(video, { url: sampleVideo, coverUrl: sampleCover || null });
         changed = true;
       }
       if (video.status === 'completed' && time >= video.expiresAt) {
         Object.assign(video, { status: 'expired', url: null, coverUrl: null });
         changed = true;
       }
+      if (video.status === 'completed') {
+        const sample = generationResult(video.id, video.created);
+        const url = sampleVideo || sample.url;
+        const coverUrl = sampleVideo ? sampleCover || null : sampleCover || sample.coverUrl;
+        if (video.url !== url || video.coverUrl !== coverUrl) {
+          Object.assign(video, { url, coverUrl });
+          changed = true;
+        }
+      }
     }
     for (const task of data.publications) {
+      const result = data.generations.find(item => item.id === task.generationId);
+      if (result && task.coverUrl !== result.coverUrl) {
+        task.coverUrl = result.coverUrl;
+        changed = true;
+      }
       if (task.status === 'queued' || task.status === 'scheduled' && time >= task.planned) {
         const video = data.generations.find(item => item.id === task.generationId);
         const status = task.planned && time - task.planned > lateWindow ? 'missed' : video?.status !== 'completed' ? 'expired' : 'publishing';

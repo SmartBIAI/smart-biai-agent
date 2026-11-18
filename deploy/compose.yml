@@ -1,7 +1,7 @@
 name: smart-biai-agent
 services:
   agent:
-    image: smart-biai-agent:0.1.0-docker.1
+    image: smart-biai-agent:0.1.0-docker.2
     restart: unless-stopped
     init: true
     env_file: .env
@@ -10,7 +10,7 @@ services:
       PORT: '4173'
       BIAI_DATA_DIR: /data
       BIAI_REQUIRE_AUTH: 'true'
-      BIAI_BASE_PATH: ${BIAI_BASE_PATH:-/smart-biai-agent-app}
+      BIAI_BASE_PATH: ${BIAI_BASE_PATH:-/smart-biai-agent}
     ports:
       - '127.0.0.1:${BIAI_BIND_PORT:-4178}:4173'
     volumes:

@@ -9,14 +9,14 @@
 - 服务器能够访问 npm 软件源、Smart BIAI 和所选 AI 服务。
 - 当前用户有 Docker 使用权限，以及部署目录的读写权限。
 
-以下域名使用 `agent.example.com`，应用路径使用 `/smart-biai-agent-app/`，请将域名替换为自己的域名。路径与仓库自带的 Compose 和 Nginx 示例一致。
+以下域名使用 `agent.example.com`，应用路径使用 `/smart-biai-agent/`，请将域名替换为自己的域名。路径与仓库自带的 Compose 和 Nginx 示例一致。静态体验可另外部署到 `/smart-biai-agent-static/`。
 
 ## 构建并准备配置
 
 ```sh
 git clone https://github.com/SmartBIAI/smart-biai-agent.git
 cd smart-biai-agent
-docker build -t smart-biai-agent:0.1.0-docker.1 .
+docker build -t smart-biai-agent:0.1.0-docker.2 .
 cd deploy
 cp .env.example .env
 chmod 600 .env
@@ -26,7 +26,7 @@ chmod 600 .env
 
 ```dotenv
 BIAI_PUBLIC_ORIGIN=https://agent.example.com
-BIAI_BASE_PATH=/smart-biai-agent-app
+BIAI_BASE_PATH=/smart-biai-agent
 BIAI_BIND_PORT=4178
 BIAI_LOGIN_USER=admin
 BIAI_LOGIN_PASSWORD=CHANGE_ME_BEFORE_START
@@ -57,11 +57,11 @@ docker compose -f compose.yml ps
 将域名解析到服务器，在 Nginx 中为该域名配置 HTTPS。宝塔用户进入「网站 → 自己的域名 → 配置文件」，在 HTTPS `server { ... }` 中加入以下两段，与其他 `location` 同级。
 
 ```nginx
-location = /smart-biai-agent-app {
-    return 308 /smart-biai-agent-app/;
+location = /smart-biai-agent {
+    return 301 /smart-biai-agent/$is_args$args;
 }
 
-location ^~ /smart-biai-agent-app/ {
+location ^~ /smart-biai-agent/ {
     proxy_pass http://127.0.0.1:4178;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -84,11 +84,11 @@ location ^~ /smart-biai-agent-app/ {
 
 执行 `nginx -t`，通过后重载 Nginx。宝塔默认安装可使用 `/www/server/nginx/sbin/nginx -t`，再在面板重载。若 Nginx 运行在容器中，需要让它能够访问应用容器，并按实际容器网络设置 `proxy_pass`。
 
-打开 `https://agent.example.com/smart-biai-agent-app/`，在浏览器弹出的登录窗口中输入工作台账号和密码。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。
+打开 `https://agent.example.com/smart-biai-agent/`，在浏览器弹出的登录窗口中输入工作台账号和密码。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。跳转采用 301，以兼容旧版 Nginx；版本差异见 [Nginx return 指令说明](https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#return)。
 
 ### 自定义访问路径
 
-例如，希望正式应用位于 `/smart-biai-agent/`，首次启动前将 `.env` 中的 `BIAI_BASE_PATH` 改为 `/smart-biai-agent`，并让 Nginx 的两个 `location` 使用同一路径。`proxy_pass` 保留完整请求路径，端口后省略末尾斜杠。
+例如，希望正式应用位于 `/agent/`，首次启动前将 `.env` 中的 `BIAI_BASE_PATH` 改为 `/agent`，并让 Nginx 的两个 `location` 使用同一路径。`proxy_pass` 保留完整请求路径，端口后省略末尾斜杠。
 
 `BIAI_PUBLIC_ORIGIN` 和 `BIAI_MEDIA_PUBLIC_ORIGIN` 只填写 HTTPS 域名。URL 前缀与部署目录、数据目录分别配置。静态体验版使用相对资源路径，迁移到新 URL 时调整 Nginx 的路径即可。
 
@@ -137,13 +137,15 @@ fi
 ```sh
 cd ..
 git pull --ff-only
-docker build -t smart-biai-agent:0.1.0-docker.1 .
+docker build -t smart-biai-agent:0.1.0-docker.2 .
 cd deploy
 docker compose -f compose.yml up -d --force-recreate
 curl -fsS http://127.0.0.1:4178/healthz
 ```
 
 恢复备份前先停止实例，再还原匹配的数据和环境配置。备份包含服务密钥和业务记录，应限制访问权限。
+
+已使用离线镜像包安装的实例，以及同时运行静态体验站点的实例，请参阅 [部署更新指南](更新说明.md)。沿用原目录和 `.env`，无需重新配置已保存的连接信息。
 
 ## 常见问题
 

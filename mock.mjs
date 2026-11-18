@@ -9,13 +9,11 @@ export const models = [
   { id: 'smartbiai-sd-2-0-lite-260722', name: 'Seedance 2.0 Lite', min: 5, max: 15, ratios: ['9:16'], resolutions: ['720p'] }
 ];
 
-const sampleRoot = 'https://storage.googleapis.com/gtv-videos-bucket/sample';
-
 export function generationResult(id, completedAt) {
   return {
     sourceTaskId: `mock-gen-${id}`,
-    url: `${sampleRoot}/ForBiggerJoyrides.mp4`,
-    coverUrl: `${sampleRoot}/images/ForBiggerJoyrides.jpg`,
+    url: './demo-assets/sample-video.mp4',
+    coverUrl: './demo-assets/sample-cover.jpg',
     expiresAt: completedAt + 7 * 24 * 60 * 60 * 1000
   };
 }

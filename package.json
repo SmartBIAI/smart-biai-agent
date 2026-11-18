@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "build:demo": "node build-demo.mjs"
+    "build:demo": "node build-demo.mjs",
+    "test": "npm run build:demo && node --test"
   },
   "dependencies": {
     "ali-oss": "^6.23.0"

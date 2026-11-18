@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +20,7 @@ await mkdir(output, { recursive: true });
 await Promise.all([
   writeFile(join(output, 'index.html'), html),
   ...['app.js', 'styles.css', 'demo.js'].map(file => copyFile(join(root, 'web', file), join(output, file))),
-  copyFile(join(root, 'mock.mjs'), join(output, 'mock.js'))
+  copyFile(join(root, 'mock.mjs'), join(output, 'mock.js')),
+  cp(join(root, 'web', 'demo-assets'), join(output, 'demo-assets'), { recursive: true })
 ]);
 console.log(`Public demo: ${output}`);

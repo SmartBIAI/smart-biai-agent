@@ -17,3 +17,4 @@ uploads/
 !/doc/.env.example
 !/doc/部署说明.md
 !/doc/宝塔Docker首次部署.md
+!/doc/更新说明.md

@@ -183,6 +183,10 @@ async function sendSharedMedia(request, response, url, match) {
   const file = await getUpload(match[1]);
   const extension = extname(file.name).toLowerCase();
   if (extension !== match[2] || !Object.hasOwn(mediaTypes, extension)) fail(404, '找不到这个素材。');
+  return sendMediaFile(request, response, file, extension);
+}
+
+async function sendMediaFile(request, response, file, extension, disposition = 'attachment') {
   let start = 0;
   let end = file.size - 1;
   if (request.headers.range) {
@@ -200,7 +204,7 @@ async function sendSharedMedia(request, response, url, match) {
   }
   response.setHeader('Cache-Control', 'private, no-store');
   response.setHeader('Content-Type', mediaTypes[extension][1]);
-  response.setHeader('Content-Disposition', 'attachment');
+  response.setHeader('Content-Disposition', disposition);
   response.setHeader('Accept-Ranges', 'bytes');
   response.setHeader('Content-Length', end - start + 1);
   if (request.method === 'HEAD') response.end();
@@ -212,10 +216,11 @@ function generationView(row, mode) {
   const now = Date.now();
   const expired = row.expires !== null && row.expires <= now;
   const linkExpired = row.link_expires !== null && row.link_expires <= now;
+  const sample = row.mode === 'mock' && row.source_id ? generationResult(row.id, row.created) : null;
   return {
     id: row.id, parameters: JSON.parse(row.parameters), credits: row.credits, created: row.created,
     status: expired ? 'expired' : row.mode === 'live' ? row.state : row.source_id ? 'completed' : 'generating', sourceTaskId: row.source_id,
-    url: expired || linkExpired ? null : row.url, coverUrl: expired || linkExpired ? null : row.cover,
+    url: expired || linkExpired ? null : sample?.url ?? row.url, coverUrl: expired || linkExpired ? null : sample?.coverUrl ?? row.cover,
     expiresAt: row.expires, error: row.error, mode: row.mode
   };
 }
@@ -224,7 +229,7 @@ function publicationView(row) {
   if (!row) fail(404, '未找到这项发布任务。');
   return {
     id: row.id, generationId: row.generation_id, accountId: row.account, title: row.title,
-    description: row.description, coverUrl: row.cover, ai: Boolean(row.ai), planned: row.planned,
+    description: row.description, coverUrl: row.mode === 'mock' ? generationResult(row.generation_id, row.created).coverUrl : row.cover, ai: Boolean(row.ai), planned: row.planned,
     zone: row.zone, status: row.status, created: row.created, submitted: row.submitted, updated: row.updated,
     sourceTaskId: row.source_id, materialId: row.material_id, error: row.error, mode: row.mode,
     account: row.account_snapshot ? JSON.parse(row.account_snapshot) : null
@@ -653,12 +658,13 @@ const assets = new Map([
   ['/app.js', ['app.js', 'text/javascript']],
   ['/styles.css', ['styles.css', 'text/css']]
 ]);
+const demoAssets = new Set(['/demo-assets/sample-video.mp4', '/demo-assets/sample-cover.jpg']);
 const { port, host } = access;
 
 const server = createServer(async (request, response) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; img-src 'self' https: data:; media-src https:; form-action 'self'");
+  response.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; img-src 'self' https: data:; media-src 'self' https:; form-action 'self'");
   try {
     if (!access.validHost(request.headers.host)) fail(403, '访问域名与工作台配置不一致。');
     const url = new URL(request.url, 'http://localhost');
@@ -670,7 +676,7 @@ const server = createServer(async (request, response) => {
     }
     const path = access.path(url.pathname);
     if (access.basePath && url.pathname === access.basePath && request.method === 'GET') {
-      response.writeHead(308, { Location: `${access.basePath}/${url.search}` });
+      response.writeHead(301, { Location: `${access.basePath}/${url.search}` });
       response.end();
       return;
     }
@@ -686,6 +692,10 @@ const server = createServer(async (request, response) => {
       return;
     }
     if (request.method === 'POST' && !access.validOrigin(request.headers.origin)) fail(403, '请求来源无效。');
+    if (['GET', 'HEAD'].includes(request.method) && demoAssets.has(path)) {
+      const file = fileURLToPath(new URL(`./web${path}`, import.meta.url));
+      return await sendMediaFile(request, response, { path: file, size: (await stat(file)).size }, extname(file), 'inline');
+    }
     const upload = path.match(/^\/api\/files\/([a-f\d-]+)(\/preview)?$/i);
     if (request.method === 'GET' && upload) {
       response.setHeader('Cache-Control', 'no-store');

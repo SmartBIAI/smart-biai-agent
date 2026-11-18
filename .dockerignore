@@ -13,3 +13,6 @@
 !web/index.html
 !web/app.js
 !web/styles.css
+!web/demo-assets/
+!web/demo-assets/sample-video.mp4
+!web/demo-assets/sample-cover.jpg

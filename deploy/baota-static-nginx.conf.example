@@ -1,0 +1,11 @@
+# Add inside your domain's HTTPS server block. Adjust only the alias directory.
+location = /smart-biai-agent-static {
+    return 301 /smart-biai-agent-static/$is_args$args;
+}
+
+location ^~ /smart-biai-agent-static/ {
+    alias /opt/smart-biai-agent-demo/;
+    index index.html;
+    autoindex off;
+    add_header Cache-Control "no-cache" always;
+}
