@@ -11,7 +11,7 @@ async function until(check, label) {
   throw new Error(`Timed out: ${label}`);
 }
 
-async function app({ agentReply } = {}) {
+async function app({ agentReply, initialAccounts, initialPublications } = {}) {
   const { window } = new JSDOM('', { url: 'https://example.com/agent/', runScripts: 'outside-only', pretendToBeVisual: true });
   window.HTMLDialogElement.prototype.showModal ||= function () { this.open = true; };
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
@@ -26,7 +26,9 @@ async function app({ agentReply } = {}) {
     const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
     requests.push({ path, body });
     try {
-      const data = path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
+      let data = path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
+      if (path === 'bootstrap' && initialAccounts) data = { ...data, accounts: initialAccounts };
+      if (path === 'publications' && !body && initialPublications) data = structuredClone(initialPublications);
       return { ok: true, status: 200, json: async () => data };
     }
     catch (error) { return { ok: false, status: error.status || 500, json: async () => ({ error: error.message }) }; }
@@ -179,5 +181,74 @@ test('a text reply can choose video for an unclear referenced request', async ()
     const form = ui.document.querySelector('[data-form="generation"]');
     assert.equal(form.elements.prompt.value, '用参考图生成一个'); assert.ok(form.textContent.includes('cap.png'));
     assert.equal(ui.document.querySelector('[data-form="image-generation"]'), null);
+  } finally { await ui.close(); }
+});
+
+const manyAccounts = Array.from({ length: 65 }, (_, index) => ({
+  id: String(1000 + index), name: `品牌${index}`, alias: `Brand ${index}`, platform: index % 2 ? 'YouTube' : 'TikTok',
+  country: index < 45 ? index % 2 ? '美国' : 'US' : index < 60 ? 'GB' : '', authStatus: 20, authorization: '已授权'
+}));
+const manyWorks = [1000, 1001].flatMap(accountId => Array.from({ length: accountId === 1000 ? 47 : 21 }, (_, index) => ({
+  id: `work-${accountId}-${index}`, accountId: String(accountId), title: `作品${accountId}-${index}`, status: 'completed', updated: 1000000 + index, zone: 'UTC'
+})));
+function scrollBottom(ui, container) {
+  Object.defineProperties(container, {clientHeight: {configurable:true,value:300},scrollHeight:{configurable:true,value:2000}});
+  container.scrollTop = 1700;
+  container.dispatchEvent(new ui.window.Event('scroll'));
+}
+async function accountPage() {
+  const ui = await app({ initialAccounts: manyAccounts, initialPublications: manyWorks });
+  ui.window.location.hash = '#accounts';
+  await until(() => ui.document.querySelector('#account-country'), 'accounts page');
+  return ui;
+}
+
+test('account and work lists independently add 20 rows on scroll and reset works when changing accounts', async () => {
+  const ui = await accountPage(); const {document} = ui;
+  try {
+    const left = document.querySelector('#account-table');
+    assert.equal(left.querySelectorAll('tbody tr').length,20);
+    assert.equal(document.querySelectorAll('#account-works .work-row').length,20);
+    scrollBottom(ui,left);
+    assert.equal(left.querySelectorAll('tbody tr').length,40); assert.equal(left.scrollTop,1700);
+    assert.equal(document.querySelectorAll('#account-works .work-row').length,20);
+    scrollBottom(ui,left); assert.equal(left.querySelectorAll('tbody tr').length,60);
+    scrollBottom(ui,left); assert.equal(left.querySelectorAll('tbody tr').length,65);
+    assert.equal(left.querySelector('[data-action="load-account-list"]'),null);
+    const right = document.querySelector('#account-works');
+    scrollBottom(ui,right); assert.equal(right.querySelectorAll('.work-row').length,40);
+    assert.equal(left.querySelectorAll('tbody tr').length,65); assert.equal(right.scrollTop,1700);
+    scrollBottom(ui,right); assert.equal(right.querySelectorAll('.work-row').length,47);
+    assert.equal(right.querySelector('[data-action="load-account-list"]'),null);
+    assert.equal(right.querySelector('.work-row strong').textContent,'作品1000-46');
+    document.querySelector('[data-action="account"][data-id="1001"]').click();
+    assert.equal(document.querySelectorAll('#account-works .work-row').length,20);
+    assert.equal(document.querySelector('#account-works').scrollTop,0); assert.equal(left.scrollTop,1700);
+  } finally { await ui.close(); }
+});
+
+test('country, platform and search filters combine across the whole loaded account catalog and restart at 20', async () => {
+  const ui = await accountPage(); const {document} = ui;
+  try {
+    const country = document.querySelector('#account-country');
+    assert.equal([...country.options].filter(option => option.value==='US').length,1);
+    assert.ok([...country.options].some(option => option.value==='__unknown__'));
+    ui.change(country,'US');
+    let left = document.querySelector('#account-table');
+    assert.equal(left.querySelectorAll('tbody tr').length,20); assert.ok(left.textContent.includes('20 / 45'));
+    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.children[2].textContent==='美国（US）'));
+    left.querySelector('[data-action="load-account-list"]').click();
+    assert.equal(left.querySelectorAll('tbody tr').length,40);
+    ui.change(document.querySelector('#account-filter'),'YouTube');
+    assert.equal(left.querySelectorAll('tbody tr').length,20); assert.equal(left.scrollTop,0);
+    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.children[1].textContent==='YouTube'));
+    const search = document.querySelector('#account-search'); search.value='Brand 43'; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(left.querySelectorAll('tbody tr').length,1); assert.ok(left.textContent.includes('品牌43'));
+    search.value='missing'; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(left.querySelectorAll('tbody tr').length,0); assert.ok(document.querySelector('#account-detail').textContent.includes('选择社媒账号'));
+    search.value=''; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    ui.change(document.querySelector('#account-filter'),''); ui.change(country,'__unknown__');
+    assert.equal(left.querySelectorAll('tbody tr').length,5); assert.ok(left.textContent.includes('品牌64'));
+    assert.ok(document.querySelector('#account-works').textContent.includes('尚无发布作品'));
   } finally { await ui.close(); }
 });

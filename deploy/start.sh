@@ -19,7 +19,7 @@ if [ ! -f .env ]; then
 fi
 
 chmod 600 .env
-image='smart-biai-agent:0.2.2-docker.1'
+image='smart-biai-agent:0.2.3-docker.1'
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     if [ ! -f images.tar ]; then
         echo 'Missing images.tar. Load the offline image or build the Dockerfile first.' >&2
