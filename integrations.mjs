@@ -1,4 +1,4 @@
-import { normalizeModel } from './generation-models.js';
+import { normalizeModel, normalizeGenerationIntent } from './generation-models.js';
 
 const socialRoot = 'https://border-api.biaibiai.com/open-api';
 const videoRoot = 'https://developer.biaibiai.com';
@@ -211,7 +211,7 @@ export async function understand(config, message, history, fill = false) {
   const title = clean(parsed.title, 100);
   const description = clean(parsed.description, 1000);
   if (fill) return { title, description };
-  return {
+  return normalizeGenerationIntent(message, {
     query: parsed.query === true, generate: parsed.generate === true, generateImage: parsed.generateImage === true, imageQuery: parsed.imageQuery === true,
     model: clean(parsed.model, 100), n: Number.isInteger(parsed.n) && parsed.n >= 1 && parsed.n <= 8 ? parsed.n : 1,
     publish: parsed.publish === true, taskQuery: parsed.taskQuery === true,
@@ -220,5 +220,5 @@ export async function understand(config, message, history, fill = false) {
     keyword: clean(parsed.keyword, 100), country: clean(parsed.country, 80), prompt: clean(parsed.prompt, 20000), title, description,
     ratio: clean(parsed.ratio, 10), duration: parsed.duration === -1 || Number.isInteger(parsed.duration) && parsed.duration > 0 && parsed.duration <= 600 ? parsed.duration : null,
     message: clean(parsed.message, 600)
-  };
+  });
 }

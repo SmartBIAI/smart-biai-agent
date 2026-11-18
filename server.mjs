@@ -16,6 +16,7 @@ import { webAccess } from './web-access.mjs';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
 const access = webAccess(process.env);
+const appVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const directory = resolve(process.env.BIAI_DATA_DIR || fileURLToPath(new URL('./.data/', import.meta.url)));
 const filesDirectory = resolve(directory, 'uploads');
 mkdirSync(directory, { recursive: true });
@@ -475,12 +476,12 @@ const imageJobs = createImageJobs(database, {
 async function bootstrap(mode) {
   const settings = Object.fromEntries(Object.keys(groups).map(name => [name, settingView(name)]));
   settings.storage = storageView();
-  if (mode === 'mock') return { mode, accounts, models, imageModels, settings, issues: {} };
+  if (mode === 'mock') return { mode, version: appVersion, accounts, models, imageModels, settings, issues: {} };
   const [social, video, image] = await Promise.allSettled([Promise.resolve().then(() => socialClient(configuration('social')).accounts()), liveModels(), liveImageModels()]);
   const found = social.status === 'fulfilled' ? social.value.accounts : [];
   const catalog = video.status === 'fulfilled' ? video.value : [];
   return {
-    mode, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
+    mode, version: appVersion, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
     issues: {
       social: social.status === 'rejected' ? social.reason.message : social.value.limited ? '当前已加载前 500 个账号，可在 Agent 按账号 ID 或平台查询。' : '',
       video: video.status === 'rejected' ? video.reason.message : catalog.length ? '' : '已连接生成服务，请在 Smart BIAI 开通视频模型。',
@@ -668,12 +669,14 @@ async function api(request, path) {
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
-  ['/styles.css', ['styles.css', 'text/css']]
+  ['/styles.css', ['styles.css', 'text/css']],
+  ['/generation-models.js', ['../generation-models.js', 'text/javascript']]
 ]);
 const demoAssets = new Set(['/demo-assets/sample-video.mp4', '/demo-assets/sample-cover.jpg']);
 const { port, host } = access;
 
 const server = createServer(async (request, response) => {
+  response.setHeader('X-BIAI-Version', appVersion);
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Referrer-Policy', 'no-referrer');
   response.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; img-src 'self' https: data:; media-src 'self' https:; form-action 'self'");
@@ -718,7 +721,7 @@ const server = createServer(async (request, response) => {
       const [file, type] = assets.get(path);
       response.setHeader('Content-Type', `${type}; charset=utf-8`);
       response.setHeader('Cache-Control', 'no-store');
-      response.end(readFileSync(new URL(`./web/${file}`, import.meta.url)));
+      response.end(readFileSync(new URL(`./web/${file}`, import.meta.url), 'utf8').replaceAll('__BIAI_VERSION__', appVersion));
       return;
     }
     response.setHeader('Content-Type', 'application/json; charset=utf-8');

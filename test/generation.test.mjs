@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { models, imageModels, normalizeModel, videoParameters, imageParameters, validateVideoReferences } from '../generation-models.js';
+import { models, imageModels, normalizeModel, videoParameters, imageParameters, validateVideoReferences, explicitMediaIntent, normalizeGenerationIntent } from '../generation-models.js';
 import { interpret } from '../mock.mjs';
 import { createImageJobs } from '../image-jobs.mjs';
-import { videoClient, imageClient } from '../integrations.mjs';
+import { videoClient, imageClient, understand } from '../integrations.mjs';
 
 const imageModel = imageModels.find(model => model.id === 'smartbiai-gpt-img-2-6-sunburst');
 const imageBody = () => ({ id: randomUUID(), model: imageModel.id, prompt: '白色背景上的蓝色陶瓷杯', n: 2, size: '1024x1024', quality: 'auto' });
@@ -69,6 +69,33 @@ test('image and video instructions select separate flows', () => {
   assert.equal(interpret('查看生图记录').generateImage, false);
   assert.equal(interpret('查看图片').imageQuery, true);
   assert.equal(interpret('使用 Seedance2.5 生成30秒视频').model, 'smartbiai-sd-2-5-260719');
+});
+
+test('explicit image and video commands take precedence over an ambiguous AI classification', () => {
+  for (const message of ['生成图片', '请帮我生成一张产品海报', '生成视频封面', '用刚才的视频生成一张封面图片', '生成两张用于视频的图片']) {
+    assert.equal(explicitMediaIntent(message), 'image', message);
+    const result = normalizeGenerationIntent(message, { generate: true, generateImage: false, prompt: '视频提示词' });
+    assert.equal(result.generateImage, true); assert.equal(result.generate, false); assert.equal(result.prompt, message);
+  }
+  for (const message of ['图生视频', '使用参考图片生成6秒视频', '把图片做成视频']) assert.equal(explicitMediaIntent(message), 'video', message);
+  assert.equal(explicitMediaIntent('先生成图片，再生成视频'), null);
+  assert.equal(explicitMediaIntent('不要把图片生成视频'), null);
+  assert.equal(explicitMediaIntent('不要生成图片'), null);
+  assert.equal(explicitMediaIntent('查看生成的图片'), 'image-query');
+});
+
+test('both AI providers normalize an explicit image request before returning it to the client', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const provider of ['deepseek', 'doubao']) {
+      const wrong = JSON.stringify({ generate: true, generateImage: false, prompt: '生成视频' });
+      globalThis.fetch = async () => new Response(JSON.stringify(provider === 'deepseek' ?
+        { stop_reason: 'end_turn', content: [{ type: 'text', text: wrong }] } :
+        { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: wrong }] }] }));
+      const intent = await understand({ provider, model: 'test-model', key: 'test-key' }, '生成图片', ['生成一段视频']);
+      assert.equal(intent.generateImage, true); assert.equal(intent.generate, false); assert.equal(intent.prompt, '生成图片');
+    }
+  } finally { globalThis.fetch = original; }
 });
 
 test('image spec and mask requirements follow the selected model', () => {

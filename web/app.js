@@ -1,3 +1,5 @@
+import { normalizeGenerationIntent } from './generation-models.js';
+
 const icons = {
   image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
   audio: '<path d="M3 12h2m3-4v8m4-12v16m4-12v8m3-4h2"/>',
@@ -658,7 +660,7 @@ async function sendMessage(message) {
   renderChat();
   if (!value) return;
   try {
-    const intent = await request('agent', { message: value, history });
+    const intent = normalizeGenerationIntent(value, await request('agent', { message: value, history }));
     if (state.chat !== chat) return;
     intent.zone = suggestedZone(value);
     intent.planned = scheduleSuggestion(value, intent.zone);

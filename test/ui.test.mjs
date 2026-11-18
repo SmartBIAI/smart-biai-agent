@@ -4,17 +4,19 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { createMockRequest } from './helpers/mock-api.mjs';
+import { normalizeGenerationIntent } from '../generation-models.js';
 
 async function until(check, label) {
   for (let index = 0; index < 150; index++) { const result = check(); if (result) return result; await wait(20); }
   throw new Error(`Timed out: ${label}`);
 }
 
-async function app() {
+async function app({ agentReply } = {}) {
   const { window } = new JSDOM('', { url: 'https://example.com/agent/', runScripts: 'outside-only', pretendToBeVisual: true });
   window.HTMLDialogElement.prototype.showModal ||= function () { this.open = true; };
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
   window.HTMLElement.prototype.scrollTo ||= function () {};
+  window.normalizeGenerationIntent = normalizeGenerationIntent;
   let clock = Date.now();
   const requests = [];
   const storage = new Map();
@@ -23,12 +25,14 @@ async function app() {
     const path = String(url).split('/api/')[1];
     const body = options.body ? JSON.parse(options.body) : undefined;
     requests.push({ path, body });
-    try { const data = await request(path, body); return { ok: true, status: 200, json: async () => data }; }
+    try { const data = path === 'agent' && agentReply ? agentReply : await request(path, body); return { ok: true, status: 200, json: async () => data }; }
     catch (error) { return { ok: false, status: error.status || 500, json: async () => ({ error: error.message }) }; }
   };
   const html = (await readFile(new URL('../web/index.html', import.meta.url), 'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
   window.document.write(html);
-  const source = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8')).replaceAll('import.meta.url', JSON.stringify('https://example.com/agent/app.js'));
+  const source = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8'))
+    .replace("import { normalizeGenerationIntent } from './generation-models.js';", '')
+    .replaceAll('import.meta.url', JSON.stringify('https://example.com/agent/app.js'));
   await window.eval(`(async () => { ${source}\n })()`);
   return { window, document: window.document, requests, advance: () => { clock += 2000; },
     change(element, value) { element.value = value; element.dispatchEvent(new window.Event('change', { bubbles: true })); },
@@ -97,5 +101,17 @@ test('video form shows all models and updates resolution and duration options', 
     assert.equal(form.elements.duration.value, '15');
     assert.ok(![...form.elements.duration.options].some(option => option.value === '-1'));
     assert.equal(form.elements.prompt.value.includes('马克杯'), true);
+  } finally { await ui.close(); }
+});
+
+test('an explicit image request cannot open a video form even if an older AI reply selects video', async () => {
+  const ui = await app({ agentReply: { generate: true, generateImage: false, prompt: '生成一段视频', accounts: [] } });
+  try {
+    const form = ui.document.querySelector('#composer');
+    form.elements.message.value = '生成图片'; ui.submit(form);
+    await until(() => ui.document.querySelector('[data-form="image-generation"]'), 'image form after stale video intent');
+    assert.equal(ui.document.querySelector('[data-form="generation"]'), null);
+    assert.equal(ui.document.querySelector('[data-form="image-generation"]').elements.prompt.value, '生成图片');
+    assert.equal(ui.requests.filter(request => request.path === 'images' && request.body).length, 0);
   } finally { await ui.close(); }
 });

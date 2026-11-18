@@ -1,4 +1,4 @@
-import { models, imageModels } from './generation-models.js';
+import { models, imageModels, normalizeGenerationIntent } from './generation-models.js';
 export { models, imageModels };
 
 export const accounts = [
@@ -35,11 +35,11 @@ export function interpret(message) {
   const title = message.match(/(?:标题(?:为|是)?[：:\s]+|标题[「“])([^」”\n，。]+)/)?.[1]?.trim();
   const count = message.match(/([1-8一二两三四五六七八])\s*张/)?.[1];
   const n = Number(count) || ({ 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8 }[count]) || 1;
-  return {
+  return normalizeGenerationIntent(message, {
     generate, generateImage, imageQuery, model: selectedModel?.id || '', n,
     publish, query: !imageQuery && query, taskQuery, targetId: target?.id ?? '', requiresSchedule, title,
     accounts: query ? matches : [],
     ratio: /横屏|16:9/.test(message) ? '16:9' : /方形|1:1/.test(message) ? '1:1' : '9:16',
     duration: /自动时长/.test(message) ? -1 : Number(message.match(/(\d{1,2})\s*秒/)?.[1]) || 6
-  };
+  });
 }
