@@ -18,3 +18,8 @@ uploads/
 !/doc/部署说明.md
 !/doc/宝塔Docker首次部署.md
 !/doc/更新说明.md
+
+# Private site tooling is maintained outside the public application.
+/build-demo.mjs
+/web/demo.js
+/deploy/baota-static-nginx.conf.example

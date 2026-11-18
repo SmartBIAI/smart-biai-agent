@@ -1,5 +1,5 @@
-import { accounts, models, imageModels, interpret, generationResult } from './mock.js';
-import { videoParameters, imageParameters, mockVideoCredits } from './generation-models.js';
+import { accounts, models, imageModels, interpret, generationResult } from '../../mock.mjs';
+import { videoParameters, imageParameters, mockVideoCredits } from '../../generation-models.js';
 
 const generationDelay = 1800;
 const publicationDelay = 3800;
@@ -13,7 +13,7 @@ function estimate(body) {
   };
 }
 
-export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now = Date.now }) {
+export function createMockRequest({ storage, key, now = Date.now }) {
   return async (path, body) => {
     const data = JSON.parse(storage.getItem(key) || '{"generations":[],"publications":[],"conversations":[]}');
     const time = now();
@@ -29,15 +29,6 @@ export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now 
       if (video.status === 'completed' && time >= video.expiresAt) {
         Object.assign(video, { status: 'expired', url: null, coverUrl: null });
         changed = true;
-      }
-      if (video.status === 'completed') {
-        const sample = generationResult(video.id, video.created);
-        const url = sampleVideo || sample.url;
-        const coverUrl = sampleVideo ? sampleCover || null : sampleCover || sample.coverUrl;
-        if (video.url !== url || video.coverUrl !== coverUrl) {
-          Object.assign(video, { url, coverUrl });
-          changed = true;
-        }
       }
     }
     for (const task of data.publications) {
@@ -147,6 +138,6 @@ export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now 
       data.conversations = [{ ...summary, chat: body.chat, drafts: body.drafts }, ...data.conversations.filter(item => item.id !== id)];
       return save(summary);
     }
-    fail(404, '公开体验仅支持模拟操作。');
+    fail(404, '未实现的模拟测试请求。');
   };
 }

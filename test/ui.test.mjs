@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
-import { createDemoRequest } from '../dist/demo/demo.js';
+import { createMockRequest } from './helpers/mock-api.mjs';
 
 async function until(check, label) {
   for (let index = 0; index < 150; index++) { const result = check(); if (result) return result; await wait(20); }
@@ -18,7 +18,7 @@ async function app() {
   let clock = Date.now();
   const requests = [];
   const storage = new Map();
-  const request = createDemoRequest({ storage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) }, key: 'ui', now: () => clock });
+  const request = createMockRequest({ storage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) }, key: 'ui', now: () => clock });
   window.fetch = async (url, options = {}) => {
     const path = String(url).split('/api/')[1];
     const body = options.body ? JSON.parse(options.body) : undefined;

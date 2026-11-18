@@ -2,11 +2,13 @@
 
 基于 Smart BIAI OpenAPI 的自托管 AI 工作台，在对话中查询海外社媒账号、生成图片与视频、编辑文案，并确认立即发布或预约发布视频作品。
 
-[在线体验](https://developer.biaibiai.com/smart-biai-agent-static/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [视频 API 文档](https://developer.biaibiai.com/docs)
+[在线体验](https://developer.biaibiai.com/smart-biai-agent-static/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [OpenAPI 文档](https://developer.biaibiai.com/docs) · [版本说明](CHANGELOG.md)
 
 在线体验使用模拟数据，记录保存在当前浏览器。部署自己的工作台后，可以填写个人或团队的 API 凭证，使用真实服务。
 
 模拟视频预览使用项目自带的约 4 秒示例素材，由部署站点直接提供。
+
+当前版本 **v0.2.0** 新增对话生图与动态视频模型目录。支持图片报价、确认生成、多图预览和历史记录，详细变化见 [版本说明](CHANGELOG.md#020---2026-11-18)。
 
 ## 功能
 
@@ -19,7 +21,7 @@
 
 图片生成、视频生成与发布均由用户确认后执行。账号需处于已授权状态，实际发布能力以账号权限和平台要求为准。账号和作品运营数据、全量历史作品同步列入后续计划。
 
-真实模式从 OpenAPI 动态读取当前应用获授权的视频和图片模型，参数以实时能力为准。公开体验预置 8 个已开放视频模型与 12 个图片模型，用固定示例素材演示流程。
+真实模式从 OpenAPI 动态读取当前应用获授权的视频和图片模型，参数以实时能力为准。应用的模拟模式预置 8 个已开放视频模型与 12 个图片模型，用固定示例素材演示流程。
 
 ## 快速开始
 
@@ -34,7 +36,7 @@ npm start
 
 打开 [http://127.0.0.1:4173/](http://127.0.0.1:4173/)，选择「模拟模式」即可体验，无需 API 密钥。在 Windows PowerShell 中，也可使用 `npm.cmd ci` 和 `npm.cmd start`。
 
-服务器安装请参阅 [Docker 部署指南](doc/宝塔Docker首次部署.md)，已有实例见 [部署更新指南](doc/更新说明.md)。本地配置、参考素材和静态体验版构建方法见 [使用与配置](doc/部署说明.md)。
+服务器安装请参阅 [Docker 部署指南](doc/宝塔Docker首次部署.md)，已有实例见 [部署更新指南](doc/更新说明.md)。本地配置、参考素材和数据管理见 [使用与配置](doc/部署说明.md)。
 
 ## 连接真实服务
 

@@ -18,14 +18,9 @@ const icons = {
 };
 
 const icon = (name, size = 19) => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" stroke-linecap="round">${icons[name]}</svg>`;
-const demoOptions = document.documentElement.dataset;
-const publicDemo = demoOptions.publicDemo === 'true';
 const appPath = new URL('.', import.meta.url).pathname;
-const conversationKey = publicDemo ? `biai-demo:${appPath}` : appPath === '/' ? 'biai' : `biai:${appPath}`;
-const demoRequest = publicDemo ? (await import('./demo.js')).createDemoRequest({
-  storage: localStorage, key: `${conversationKey}-data`, sampleVideo: demoOptions.sampleVideo, sampleCover: demoOptions.sampleCover
-}) : null;
-const pages = { agent: 'BIAI Agent', accounts: '社媒账号', tasks: '发布任务', ...(!publicDemo ? { settings: '连接设置' } : {}) };
+const conversationKey = appPath === '/' ? 'biai' : `biai:${appPath}`;
+const pages = { agent: 'BIAI Agent', accounts: '社媒账号', tasks: '发布任务', settings: '连接设置' };
 const main = document.querySelector('#main');
 const navigation = document.querySelector('#navigation');
 const videoDialog = document.querySelector('#video-dialog');
@@ -44,14 +39,10 @@ const state = {
   page: '', accounts: [], models: [], imageModels: [], settings: {}, generations: [], images: [], publications: [],
   chat: [], drafts: new Map(), intentBusy: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
   taskTab: 'all', taskId: '', taskSearch: '', taskAccount: '', loaded: false,
-  mode: !publicDemo && sessionStorage.getItem(`${conversationKey}-mode`) === 'live' ? 'live' : 'mock', issues: {},
+  mode: sessionStorage.getItem(`${conversationKey}-mode`) === 'live' ? 'live' : 'mock', issues: {},
   history: [], conversation: null, historyBusy: false
 };
 const modeSelect = document.querySelector('#run-mode');
-if (publicDemo) {
-  modeSelect.querySelector('option[value="live"]').remove();
-  modeSelect.querySelector('option[value="mock"]').textContent = '公开体验';
-}
 let conversationDirty = false;
 let conversationTimer;
 let conversationSave = Promise.resolve(true);
@@ -146,7 +137,6 @@ function zoneOptions(value) {
 }
 
 async function request(path, body, mode = state.mode) {
-  if (demoRequest) return demoRequest(path, body);
   const headers = { 'X-BIAI-Mode': mode };
   const response = await fetch(`${appPath}api/${path}`, body === undefined ? { headers } : {
     method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
@@ -202,13 +192,13 @@ function renderAgent() {
     ${state.issues.ai ? `<div class="agent-issue" role="status">${esc(state.issues.ai)} <a href="#settings">连接设置</a></div>` : ''}
     <div class="chat-scroll" id="chat-scroll" aria-live="polite"></div>
     <div class="composer-wrap"><div id="attached"></div><p id="upload-status" class="field-note" role="status" hidden></p>
-    ${publicDemo ? '' : '<input type="file" id="attachment-files" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav" multiple hidden>'}
+    <input type="file" id="attachment-files" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mp3,.wav" multiple hidden>
     <form id="composer" class="composer">
-      ${publicDemo ? '' : `<button type="button" data-action="upload" class="icon-button attach" title="上传图片、视频或音频" aria-label="添加文件">${icon('link', 21)}</button>`}
+      <button type="button" data-action="upload" class="icon-button attach" title="上传图片、视频或音频" aria-label="添加文件">${icon('link', 21)}</button>
       <textarea name="message" rows="1" maxlength="2000" aria-label="给 BIAI Agent 发消息" placeholder="${esc(prompts[0][3])}" aria-describedby="composer-tab-hint"></textarea>
       <span id="composer-tab-hint" class="tab-hint">按 <kbd>Tab</kbd> 填入</span>
       <button class="send" aria-label="发送消息" title="发送消息">${icon('send', 20)}</button>
-    </form><div class="compose-foot">${publicDemo ? '公开体验 · 使用模拟数据，记录保存在当前浏览器。' : state.mode === 'live' ? '真实模式 · 生成和发布需要分别确认。' : '模拟模式 · 可体验生成和发布流程。'}</div></div>
+    </form><div class="compose-foot">${state.mode === 'live' ? '真实模式 · 生成和发布需要分别确认。' : '模拟模式 · 可体验生成和发布流程。'}</div></div>
   </section>`;
   renderChat();
   renderAttached();
@@ -519,7 +509,7 @@ function renderPublicationDraft(draft) {
     <label class="check-field"><input type="checkbox" name="ai"${draft.ai ? ' checked' : ''}> AI 生成内容</label>
     <fieldset class="mode" aria-label="发布方式"><label><input type="radio" name="mode" value="now"${draft.mode === 'now' ? ' checked' : ''}> 立即发布</label><label><input type="radio" name="mode" value="scheduled"${draft.mode === 'scheduled' ? ' checked' : ''}> 定时发布</label></fieldset>
     <div class="fields schedule-fields" data-schedule${draft.mode === 'scheduled' ? '' : ' hidden'}><label>预约时间<input type="datetime-local" name="planned" value="${esc(draft.planned)}"></label><label>时区<select name="zone">${zoneOptions(draft.zone)}</select></label></div>
-    <p class="field-note" data-schedule-note${draft.mode === 'scheduled' ? '' : ' hidden'}>${publicDemo ? '到预约时间后，可在此浏览器查看模拟发布进度。' : '请保持工作台运行。到预约时间后，工作台会开始发布。'}</p>
+    <p class="field-note" data-schedule-note${draft.mode === 'scheduled' ? '' : ' hidden'}>请保持工作台运行。到预约时间后，工作台会开始发布。</p>
     <div class="card-actions"><button class="button primary" data-confirm>${draft.mode === 'scheduled' ? '确认排期' : '确认发布'}</button></div>
     <p class="form-error" role="alert" hidden></p>
   </form>`;
@@ -1173,7 +1163,7 @@ async function loadMode() {
     navigate();
   } catch (error) {
     main.innerHTML = `<section class="page">${empty('工作台连接失败', `${esc(error.message)} 请确认工作台服务已启动，再刷新页面。`)}</section>`;
-  } finally { modeSelect.disabled = publicDemo; }
+  } finally { modeSelect.disabled = false; }
 }
 
 modeSelect.addEventListener('change', async () => {
