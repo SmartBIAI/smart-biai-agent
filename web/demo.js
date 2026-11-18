@@ -1,4 +1,5 @@
-import { accounts, models, interpret, generationResult } from './mock.js';
+import { accounts, models, imageModels, interpret, generationResult } from './mock.js';
+import { videoParameters, imageParameters, mockVideoCredits } from './generation-models.js';
 
 const generationDelay = 1800;
 const publicationDelay = 3800;
@@ -7,15 +8,8 @@ const lateWindow = 15 * 60 * 1000;
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
 
 function estimate(body) {
-  const model = models.find(item => item.id === body.model);
-  if (!model || !model.ratios.includes(body.ratio) || !model.resolutions.includes(body.resolution) ||
-      !Number.isInteger(body.duration) || body.duration < model.min || body.duration > model.max) fail(400, '请选择模型支持的视频参数。');
-  const prompt = body.prompt?.trim();
-  const lite = model.name.endsWith('Lite');
-  if (!prompt || prompt.length < (lite ? 10 : 1) || prompt.length > (lite ? 2000 : 20000)) fail(400, '请检查视频提示词的长度。');
   return {
-    parameters: { model: model.id, prompt, ratio: body.ratio, resolution: body.resolution, duration: body.duration, audio: Boolean(body.audio) },
-    credits: body.duration * (body.resolution === '720p' ? 6 : 4)
+    parameters: videoParameters(body, models), credits: mockVideoCredits(body)
   };
 }
 
@@ -24,6 +18,7 @@ export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now 
     const data = JSON.parse(storage.getItem(key) || '{"generations":[],"publications":[],"conversations":[]}');
     const time = now();
     let changed = false;
+    if (!Array.isArray(data.images)) { data.images = []; changed = true; }
     const save = result => { storage.setItem(key, JSON.stringify(data)); return result; };
     const reply = result => changed ? save(result) : result;
     for (const video of data.generations) {
@@ -62,9 +57,45 @@ export function createDemoRequest({ storage, key, sampleVideo, sampleCover, now 
       }
     }
 
-    if (path === 'bootstrap') return reply({ mode: 'mock', accounts, models, settings: { preferences: {} }, issues: {} });
+    for (const task of data.images) {
+      if (task.status === 'generating' && time >= task.created + generationDelay) {
+        Object.assign(task, { status: 'completed', updated: time, sourceTaskId: `demo-img-${task.id}`,
+          results: Array.from({ length: task.parameters.n }, (_, index) => ({ index, status: 'succeeded',
+            url: './demo-assets/sample-cover.jpg', mimeType: 'image/jpeg', width: 496, height: 864,
+            expiresAt: time + 7 * 86400000, urlExpiresAt: null })) });
+        changed = true;
+      }
+      if (task.status === 'completed' && task.results.every(item => item.expiresAt <= time)) {
+        task.status = 'expired'; task.results = task.results.map(item => ({ ...item, status: 'expired', url: null })); changed = true;
+      }
+    }
+
+    if (path === 'bootstrap') return reply({ mode: 'mock', accounts, models, imageModels, settings: { preferences: {} }, issues: {} });
     if (path === 'agent') return reply(interpret(body.message.trim()));
     if (path === 'quote') return reply(estimate(body));
+    if (path === 'images/quote') {
+      const parameters = imageParameters(body, imageModels);
+      return reply({ parameters, credits: parameters.n * 5 });
+    }
+    if (path === 'images') {
+      if (!body) return reply(data.images);
+      const parameters = imageParameters(body, imageModels);
+      const credits = parameters.n * 5;
+      if (credits !== body.credits) fail(409, '请重新获取并确认图片报价。');
+      const existing = data.images.find(item => item.id === body.id);
+      if (existing) {
+        if (JSON.stringify(existing.parameters) !== JSON.stringify(parameters)) fail(409, '任务编号已用于另一份生图草稿。');
+        return reply(existing);
+      }
+      const task = { id: body.id, mode: 'mock', parameters, credits, created: time, updated: time, status: 'generating', results: [], chargedCredits: 0, refundedCredits: 0 };
+      data.images.unshift(task); return save(task);
+    }
+    const imageRoute = path.match(/^images\/([^/]+)(?:\/refresh)?$/);
+    if (imageRoute) {
+      const task = data.images.find(item => item.id === imageRoute[1]);
+      if (!task) fail(404, '找不到这组图片。');
+      return reply(task);
+    }
     if (path === 'generations') {
       if (!body) return reply(data.generations);
       const quote = estimate(body);

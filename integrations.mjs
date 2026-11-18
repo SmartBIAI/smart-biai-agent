@@ -1,4 +1,4 @@
-import { models as supportedModels } from './mock.mjs';
+import { normalizeModel } from './generation-models.js';
 
 const socialRoot = 'https://border-api.biaibiai.com/open-api';
 const videoRoot = 'https://developer.biaibiai.com';
@@ -122,16 +122,9 @@ export function videoClient(config) {
   const call = (path, body) => jsonRequest('Smart BIAI 视频', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body });
   return {
     async models() {
-      const data = (await call('/v1/models'))?.data;
+      const data = (await call('/v1/models?media_type=video'))?.data;
       if (!Array.isArray(data)) throw unexpected('Smart BIAI 视频');
-      return data.flatMap(item => {
-        const known = supportedModels.find(model => model.id === item.id);
-        const cap = item.capabilities;
-        if (!known || !Array.isArray(cap?.resolutions) || !Array.isArray(cap.aspect_ratios)) return [];
-        return [{ ...known, ratios: cap.aspect_ratios, resolutions: cap.resolutions, min: cap.min_duration ?? known.min,
-          max: cap.max_duration ?? known.max, durations: cap.durations, audio: Boolean(cap.supports_audio),
-          minPrompt: cap.min_prompt_length, maxPrompt: cap.max_prompt_length, lastFrame: Boolean(cap.supports_last_frame) }];
-      }).filter(model => model.ratios.length && model.resolutions.length);
+      return data.map(item => normalizeModel(item, 'video')).filter(Boolean);
     },
     async quote(body) {
       const result = await call('/v1/videos/quote', body);
@@ -150,6 +143,32 @@ export function videoClient(config) {
   };
 }
 
+export function imageClient(config) {
+  if (!config.key) throw new IntegrationError('请在连接设置填写 Smart BIAI 图片与视频生成 API Key。', 422);
+  const call = (path, body) => jsonRequest('Smart BIAI 生图', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body, timeout: 45000 });
+  return {
+    async models() {
+      const data = (await call('/v1/models?media_type=image'))?.data;
+      if (!Array.isArray(data)) throw unexpected('Smart BIAI 生图');
+      return data.map(item => normalizeModel(item, 'image')).filter(Boolean);
+    },
+    async quote(body) {
+      const result = await call('/v1/images/quote', body);
+      if (!Number.isSafeInteger(result?.credits) || result.credits < 1) throw unexpected('Smart BIAI 生图报价');
+      return result.credits;
+    },
+    async recover(requestId) {
+      const data = (await call(`/v1/images?${new URLSearchParams({ request_id: requestId, limit: '100' })}`))?.data;
+      if (!Array.isArray(data)) throw unexpected('Smart BIAI 生图');
+      const matches = data.filter(task => task.request_id === requestId);
+      if (matches.length > 1) throw unexpected('Smart BIAI 生图');
+      return matches[0] ?? null;
+    },
+    create(body) { return call('/v1/images', body); },
+    detail(id) { return call(`/v1/images/${encodeURIComponent(id)}`); }
+  };
+}
+
 export function mediaUrl(value) {
   try {
     const url = new URL(value);
@@ -161,10 +180,10 @@ export function mediaUrl(value) {
 function clean(value, max) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 
 const intentRules = `你是 Smart BIAI 工作台的指令理解组件。只返回一个 JSON 对象，不要 Markdown。当前请求不会自动执行。字段：
-query,generate,publish,taskQuery 为布尔值，可组合。查看发布任务用 taskQuery，不要当作发布；查看生成记录也不要开始生成。
+query,generate,generateImage,imageQuery,publish,taskQuery 为布尔值，可组合。generate 是视频生成，generateImage 是图片、海报、插画、封面生成；图生视频只设置 generate。imageQuery 是查看已生成的图片或生图记录。查看发布任务用 taskQuery，不要当作发布；查看生成记录也不要开始生成。
 platform 只能是 TikTok、YouTube、Instagram 或空字符串。accountId 仅从用户消息中明确的数字 ID 提取，其他情况留空。
 keyword 是用户明确指定的账号名或别名，country 是用户明确指定的国家（优先 ISO 代码），缺省为空。不要补造账号。
-prompt 是生成视频的具体提示词，可扩写用户创作需求，去掉账号、排期等操作指令；ratio 使用用户指定的画幅或留空；duration 为明确提到的整数秒或 null。
+prompt 是图片或视频的具体提示词，可扩写用户创作需求，去掉账号、排期等操作指令；ratio 使用用户指定的画幅或留空；duration 为明确提到的整数秒、自动时长 -1 或 null。n 是用户明确要求的图片张数（1～8，缺省 1）；model 是用户明确指定的模型名或完整模型 ID，缺省留空。不要猜模型授权。
 title 和 description 为用户提供或基于当前对话建议的发布标题和描述。不要捏造产品承诺。仅在确有发布需求时填写文案建议。
 requiresSchedule 表示用户要求预约。不要推断具体日期、时区或未明确的时间。message 用于不属于以上操作时简短回复。
 如果操作内容不清楚，礼貌询问。不得索要密钥、改变应用设置或声称操作已执行。`;
@@ -193,11 +212,13 @@ export async function understand(config, message, history, fill = false) {
   const description = clean(parsed.description, 1000);
   if (fill) return { title, description };
   return {
-    query: parsed.query === true, generate: parsed.generate === true, publish: parsed.publish === true, taskQuery: parsed.taskQuery === true,
+    query: parsed.query === true, generate: parsed.generate === true, generateImage: parsed.generateImage === true, imageQuery: parsed.imageQuery === true,
+    model: clean(parsed.model, 100), n: Number.isInteger(parsed.n) && parsed.n >= 1 && parsed.n <= 8 ? parsed.n : 1,
+    publish: parsed.publish === true, taskQuery: parsed.taskQuery === true,
     requiresSchedule: parsed.requiresSchedule === true, platform: Object.values(platforms).includes(parsed.platform) ? parsed.platform : '',
     accountId: typeof parsed.accountId === 'string' && /^[1-9]\d{0,18}$/.test(parsed.accountId) ? parsed.accountId : '',
-    keyword: clean(parsed.keyword, 100), country: clean(parsed.country, 80), prompt: clean(parsed.prompt, 2000), title, description,
-    ratio: clean(parsed.ratio, 10), duration: Number.isInteger(parsed.duration) && parsed.duration > 0 && parsed.duration <= 600 ? parsed.duration : null,
+    keyword: clean(parsed.keyword, 100), country: clean(parsed.country, 80), prompt: clean(parsed.prompt, 20000), title, description,
+    ratio: clean(parsed.ratio, 10), duration: parsed.duration === -1 || Number.isInteger(parsed.duration) && parsed.duration > 0 && parsed.duration <= 600 ? parsed.duration : null,
     message: clean(parsed.message, 600)
   };
 }

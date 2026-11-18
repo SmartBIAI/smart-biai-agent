@@ -8,6 +8,8 @@
 !mock.mjs
 !media-storage.mjs
 !web-access.mjs
+!image-jobs.mjs
+!generation-models.js
 !LICENSE
 !web/
 !web/index.html

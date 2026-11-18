@@ -68,3 +68,23 @@ test('a custom cover works with the bundled video', async () => {
   assert.equal(result.url, './demo-assets/sample-video.mp4');
   assert.equal(result.coverUrl, 'https://example.com/custom-cover.jpg');
 });
+
+test('public demo exposes the full catalog and simulates image quote, confirmation and results', async () => {
+  let clock = time;
+  const app = fixture({}, { now: () => clock });
+  const boot = await app.request('bootstrap');
+  assert.equal(boot.models.length, 8);
+  assert.equal(boot.imageModels.length, 12);
+  const model = boot.imageModels[0];
+  const body = { id: 'demo-image', model: model.id, prompt: '明亮自然的马克杯产品图', n: 2, size: model.sizes[0], quality: model.qualities[0] };
+  const quote = await app.request('images/quote', body);
+  assert.equal(app.saved().images.length, 0);
+  await app.request('images', { ...body, credits: quote.credits });
+  clock += 2000;
+  const [task] = await app.request('images');
+  assert.equal(task.status, 'completed');
+  assert.equal(task.results.length, 2);
+  assert.ok(task.results[0].url.startsWith('./demo-assets/'));
+  assert.equal((await app.request('images/demo-image/refresh')).id, task.id);
+  assert.equal(app.saved().images.length, 1);
+});

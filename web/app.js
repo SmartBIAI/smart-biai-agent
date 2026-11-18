@@ -29,6 +29,7 @@ const pages = { agent: 'BIAI Agent', accounts: '社媒账号', tasks: '发布任
 const main = document.querySelector('#main');
 const navigation = document.querySelector('#navigation');
 const videoDialog = document.querySelector('#video-dialog');
+const imageDialog = document.querySelector('#image-dialog');
 const zoneLabels = {
   'Asia/Shanghai': '上海', 'Asia/Tokyo': '东京', 'America/New_York': '纽约',
   'America/Los_Angeles': '洛杉矶', 'Europe/London': '伦敦', UTC: 'UTC'
@@ -40,7 +41,7 @@ const pubStatuses = {
 };
 
 const state = {
-  page: '', accounts: [], models: [], settings: {}, generations: [], publications: [],
+  page: '', accounts: [], models: [], imageModels: [], settings: {}, generations: [], images: [], publications: [],
   chat: [], drafts: new Map(), intentBusy: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
   taskTab: 'all', taskId: '', taskSearch: '', taskAccount: '', loaded: false,
   mode: !publicDemo && sessionStorage.getItem(`${conversationKey}-mode`) === 'live' ? 'live' : 'mock', issues: {},
@@ -63,6 +64,12 @@ function selected(option, value) { return option === value ? ' selected' : ''; }
 function findAccount(id) { return state.accounts.find(account => account.id === id); }
 function taskAccount(task) { return task.account ?? findAccount(task.accountId); }
 function findVideo(id) { return state.generations.find(video => video.id === id); }
+function findImage(id) { return state.images.find(image => image.id === id); }
+function durationLabel(value) { return value === -1 ? '自动时长' : `${value} 秒`; }
+function chooseModel(catalog, hint = '', preferred = '') {
+  const normalized = hint.toLowerCase().replaceAll(' ', '');
+  return catalog.find(model => normalized && [model.id, model.name].some(value => value.toLowerCase().replaceAll(' ', '') === normalized)) || catalog.find(model => model.id === preferred) || catalog[0];
+}
 function defaultZone() { return state.settings.preferences?.zone || 'Asia/Shanghai'; }
 function mayPublish(account) { return account.authStatus === 20 && account.canPublish !== false; }
 function badge(label, color = 'gray') { return `<span class="badge ${color}"><span></span>${esc(label)}</span>`; }
@@ -162,8 +169,8 @@ function navigate() {
   const hash = location.hash.slice(1).split('/');
   state.page = Object.hasOwn(pages, hash[0]) ? hash[0] : 'agent';
   if (state.page === 'tasks' && hash[1]) {
-    state.taskId = hash[1];
-    state.taskTab = 'all';
+    state.taskId = hash[1] === 'images' ? '' : hash[1];
+    state.taskTab = hash[1] === 'images' ? 'image' : 'all';
     state.taskAccount = '';
     state.taskSearch = '';
   }
@@ -185,12 +192,13 @@ function heading(title, subtitle) {
 const prompts = [
   ['accounts', '查询社媒账号', '查看美国区 TikTok 账号', '查询美国区的 TikTok 账号'],
   ['video', '生成 AI 视频', '从一段描述创建视频', '生成一支 6 秒竖屏的陶瓷马克杯产品视频'],
+  ['image', '生成 AI 图片', '创作产品图、海报或封面', '生成一张简洁的陶瓷马克杯产品海报'],
   ['clock', '安排作品发布', '预览文案并选择发布时间', '生成一支 6 秒竖屏的陶瓷马克杯产品视频，明早 9 点发到品牌主号']
 ];
 
 function renderAgent() {
   main.innerHTML = `<section class="agent-page">
-    <div class="agent-header"><div>${heading('BIAI Agent', '查询社媒账号、生成视频并安排发布。')}</div><div class="agent-actions"><select id="conversation-history" aria-label="历史对话"></select><button class="button quiet" data-action="new-chat">${icon('plus', 17)} 新对话</button></div></div>
+    <div class="agent-header"><div>${heading('BIAI Agent', '查询社媒账号、生成图片与视频，并安排发布。')}</div><div class="agent-actions"><select id="conversation-history" aria-label="历史对话"></select><button class="button quiet" data-action="new-chat">${icon('plus', 17)} 新对话</button></div></div>
     ${state.issues.ai ? `<div class="agent-issue" role="status">${esc(state.issues.ai)} <a href="#settings">连接设置</a></div>` : ''}
     <div class="chat-scroll" id="chat-scroll" aria-live="polite"></div>
     <div class="composer-wrap"><div id="attached"></div><p id="upload-status" class="field-note" role="status" hidden></p>
@@ -221,10 +229,11 @@ function activateConversation(saved) {
   const storedDrafts = new Map((saved?.drafts ?? []).map(draft => [draft.id, draft]));
   state.chat = (saved?.chat ?? []).map(entry => {
     if (entry.type === 'generation' && findVideo(entry.id)) return { ...entry, type: 'result', intent: storedDrafts.get(entry.id)?.intent };
+    if (entry.type === 'image-generation' && findImage(entry.id)) return { ...entry, type: 'image-result' };
     if (entry.type === 'publication' && state.publications.some(item => item.id === entry.id)) return { ...entry, type: 'confirmed' };
     return entry;
   });
-  const draftIds = new Set(state.chat.filter(entry => ['generation', 'publication'].includes(entry.type)).map(entry => entry.id));
+  const draftIds = new Set(state.chat.filter(entry => ['generation', 'image-generation', 'publication'].includes(entry.type)).map(entry => entry.id));
   state.drafts = new Map((saved?.drafts ?? []).filter(draft => draftIds.has(draft.id)).map(draft => [draft.id, draft]));
   state.attachments = [];
   sessionStorage.setItem(`${conversationKey}-conversation-${state.mode}`, saved?.id ?? '');
@@ -348,6 +357,8 @@ function renderChat() {
     if (entry.type === 'user') return `<div class="message user"><div class="bubble">${esc(entry.text)}${attachmentList(entry.files)}</div><div class="avatar user-avatar">${icon('accounts', 17)}</div></div>`;
     if (entry.type === 'generation') return assistant(renderGenerationDraft(state.drafts.get(entry.id)));
     if (entry.type === 'result') return assistant(resultCard(entry.id, entry.intent));
+    if (entry.type === 'image-generation') return assistant(renderImageDraft(state.drafts.get(entry.id)));
+    if (entry.type === 'image-result') return assistant(imageResultCard(entry.id));
     if (entry.type === 'tasks') return assistant(`<p>最近的发布任务</p><div class="account-cards">${entry.ids.map(id => {
       const task = state.publications.find(item => item.id === id);
       return task ? `<a class="account-card" href="#tasks/${id}">${icon('tasks', 17)}<span><strong>${esc(task.title)}</strong><small>${esc(taskAccount(task)?.name)}</small></span>${publicationBadge(task.status)}${icon('arrow', 15)}</a>` : '';
@@ -358,7 +369,7 @@ function renderChat() {
       if (!task) return assistant('<p>这条发布任务暂不可查看。</p>');
       return assistant(`<div class="confirmed"><span class="confirmed-icon">${icon('check')}</span><div><strong>${task.planned ? '已确认排期' : '已确认发布'}</strong><p>${esc(task.title)} · ${esc(taskAccount(task)?.name)}${task.planned ? ` · ${dateFormat(task.planned, task.zone)} ${zoneLabels[task.zone] ?? esc(task.zone)}` : ''}</p></div><a class="button" href="#tasks/${task.id}">查看任务 ${icon('arrow', 15)}</a></div>`);
     }
-    return assistant(`<p>${esc(entry.text)}</p>${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}`);
+    return assistant(`<p>${esc(entry.text)}</p>${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
   }).join('') + (state.intentBusy ? assistant('<p class="muted">正在处理你的请求…</p>') : '');
   box.scrollTop = box.scrollHeight;
 }
@@ -388,6 +399,67 @@ function modelName(video) {
   return state.models.find(model => model.id === video.parameters.model)?.name ?? video.parameters.model;
 }
 
+function imageModelName(task) { return state.imageModels.find(model => model.id === task.parameters.model)?.name ?? task.parameters.model; }
+function imageBadge(task) {
+  const statuses = { queued: ['等待生成', 'purple'], submitting: ['正在发送', 'blue'], generating: ['生成中', 'blue'],
+    completed: ['生成完成', 'green'], partial: ['部分完成', 'orange'], failed: ['生成失败', 'red'], expired: ['图片已过期', 'red'],
+    unknown: ['受理结果查询中', 'orange'], review: ['等待服务确认', 'orange'] };
+  return badge(...(statuses[task.status] || statuses.generating));
+}
+function imageFormData(form) {
+  const values = new FormData(form);
+  const draft = state.drafts.get(form.dataset.id);
+  const model = state.imageModels.find(item => item.id === values.get('model'));
+  const maskFileId = values.get('maskFileId') || null;
+  return { model: values.get('model'), prompt: values.get('prompt'), n: Number(values.get('n')),
+    ...(model?.spec === 'ratio' ? { ratio: values.get('ratio'), resolution: values.get('resolution') } : { size: values.get('size'), quality: values.get('quality') }),
+    references: draft.links || [], fileIds: (draft.files || []).map(file => file.id).filter(id => id !== maskFileId), maskFileId };
+}
+function renderImageDraft(draft) {
+  if (!draft) return '<p>这份图片草稿暂不可查看。</p>';
+  const p = draft.parameters;
+  const model = state.imageModels.find(item => item.id === p.model);
+  if (!model) return '<p>当前生图模型不可用，请在连接设置检查生成服务。</p>';
+  const options = (items, value) => items.map(item => `<option value="${esc(item)}"${selected(item, value)}>${esc(item)}</option>`).join('');
+  const localOnly = state.mode === 'live' && draft.files?.length && !state.settings.storage?.ready;
+  const specs = model.spec === 'size' ? `<label>图片尺寸<select name="size">${options(model.sizes, p.size)}</select></label><label>质量<select name="quality">${options(model.qualities, p.quality)}</select></label>` :
+    `<label>画幅<select name="ratio">${options(model.ratios, p.ratio)}</select></label><label>清晰度<select name="resolution">${options(model.resolutions, p.resolution)}</select></label>`;
+  const pngs = (draft.files || []).filter(file => /\.png$/i.test(file.name));
+  return `<form class="inner-card image-generation-form" data-form="image-generation" data-id="${draft.id}">
+    <div class="card-header"><span class="card-icon">${icon('image')}</span><div><h3>生成图片</h3><p>${state.mode === 'live' ? '先查看积分报价，再确认生成。' : '模拟生成会展示固定示例图片。'}</p></div></div>
+    <label>图片提示词<textarea name="prompt" rows="3" maxlength="${model.maxPrompt}" required>${esc(p.prompt)}</textarea></label>
+    <div class="fields generation-fields"><label>生图模型<select name="model">${state.imageModels.map(item => `<option value="${esc(item.id)}"${selected(item.id, p.model)}>${esc(item.name)}</option>`).join('')}</select></label>
+    ${specs}<label>生成张数<select name="n">${options(Array.from({ length: model.maxCount }, (_, index) => index + 1), p.n)}</select></label></div>
+    ${attachmentList(draft.files)}
+    ${pngs.length && model.mask ? `<label>蒙版（选填）<select name="maskFileId"><option value="">所有附件作为参考图</option>${pngs.map(file => `<option value="${file.id}"${selected(file.id, p.maskFileId)}>${esc(file.name)}</option>`).join('')}</select><span class="field-note">蒙版使用透明 PNG，需与第一张参考图同尺寸；透明区域为编辑区域。</span></label>` : ''}
+    ${localOnly ? '<p class="field-note">请到连接设置配置本地文件服务器或 OSS，以便读取参考图片。</p>' : ''}
+    <div class="card-actions"><span class="quote">${draft.credits == null ? '尚未报价' : `<strong>${esc(draft.credits)}</strong> ${state.mode === 'live' ? '积分上限' : '模拟积分'}`}</span>
+    <button type="submit" class="button${draft.credits == null ? '' : ' primary'}"${localOnly ? ' disabled' : ''}>${draft.credits == null ? '获取报价' : '确认生成图片'}</button></div>
+    <p class="form-error" role="alert" hidden></p></form>`;
+}
+function imageResultCard(id) {
+  const task = findImage(id);
+  if (!task) return '<p>正在读取图片结果…</p>';
+  return `<div class="inner-card image-result-card" data-image-result="${id}"><div class="card-header"><span class="card-icon">${icon('image')}</span><div><h3>图片生成结果</h3><p>${esc(imageModelName(task))} · ${task.parameters.n} 张</p></div>${imageBadge(task)}</div>
+    <p class="field-note">${esc(task.parameters.prompt.slice(0, 180))}</p>
+    ${task.results.length ? `<div class="image-results">${task.results.map((item, index) => `<div class="image-result-item">${item.url ? `<button type="button" class="image-preview-button" data-action="preview-image" data-id="${id}" data-index="${index}" aria-label="预览第 ${index + 1} 张图片"><img src="${esc(item.url)}" alt="${esc(task.parameters.prompt.slice(0, 100))}" loading="lazy"></button>` : `<div class="image-placeholder">${icon('image', 26)}<span>${item.status === 'failed' ? '这张图片未完成' : item.status === 'expired' ? '图片已过期' : '暂无可用链接'}</span></div>`}
+    <small>第 ${index + 1} 张${task.mode === 'mock' ? ' · 示例图片' : item.width && item.height ? ` · ${item.width} × ${item.height}` : ''}</small>
+    ${item.url ? `<button class="text-button" type="button" data-action="preview-image" data-id="${id}" data-index="${index}">查看大图</button>` : ''}</div>`).join('')}</div>` : ['queued', 'submitting', 'generating', 'unknown', 'review'].includes(task.status) ? '<div class="progress"><i></i></div>' : ''}
+    ${task.error ? `<p class="form-error">${esc(task.error)}</p>` : ''}
+    ${task.mode === 'live' ? `<div class="card-actions"><span class="muted">${task.chargedCredits ? `已结算 ${esc(task.chargedCredits)} 积分` : ''}${task.refundedCredits ? ` · 已退回 ${esc(task.refundedCredits)} 积分` : ''}</span>${['completed', 'partial', 'expired'].includes(task.status) ? `<button class="button" data-action="refresh-image" data-id="${id}">刷新图片链接</button>` : ''}</div>` : ''}</div>`;
+}
+
+function renderImageDialog(id, index) {
+  const task = findImage(id);
+  const item = task?.results[index];
+  if (!item?.url) { notify('当前没有可用的图片链接，请先刷新。'); return; }
+  imageDialog.innerHTML = `<div class="detail-title"><h2 id="image-dialog-title">图片预览</h2><form method="dialog"><button class="icon-button" aria-label="关闭图片预览" autofocus>${icon('close')}</button></form></div>
+    <p class="field-note">${esc(imageModelName(task))} · 第 ${index + 1} 张${task.mode === 'mock' ? ' · 示例图片' : ''}</p>
+    <img class="image-full-preview" src="${esc(item.url)}" alt="${esc(task.parameters.prompt.slice(0, 160))}">
+    <div class="card-actions"><a class="button" href="${esc(item.url)}" target="_blank" rel="noreferrer">打开原图 ↗</a></div>`;
+  imageDialog.showModal();
+}
+
 function videoPreview(video) {
   return `<div class="media-preview"><video controls playsinline preload="metadata" src="${esc(video.url)}"${video.coverUrl ? ` poster="${esc(video.coverUrl)}"` : ''} aria-label="视频预览"></video><div class="media-meta"><span>${video.mode === 'mock' ? '示例视频' : 'Smart BIAI 生成视频'}</span><a href="${esc(video.url)}" rel="noreferrer" target="_blank">打开视频 ↗</a></div><p class="form-error" data-media-error hidden>浏览器未能加载视频，请检查网络或刷新源链接。</p></div>`;
 }
@@ -408,11 +480,11 @@ function renderGenerationDraft(draft) {
   const localOnly = hasFiles && !storage?.ready;
   return `<form class="inner-card generation-form" data-form="generation" data-id="${id}">
     <div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成视频</h3><p>${state.mode === 'live' ? '先查看积分报价，再确认生成。' : '选好视频设置后，可查看模拟报价。'}</p></div></div>
-    <label>视频提示词<textarea name="prompt" rows="2" required maxlength="20000">${esc(p.prompt)}</textarea></label>
+    <label>视频提示词<textarea name="prompt" rows="2" required maxlength="${model.maxPrompt || 20000}">${esc(p.prompt)}</textarea></label>
     <div class="fields generation-fields"><label>模型<select name="model">${state.models.map(item => `<option value="${item.id}"${selected(item.id, p.model)}>${item.name}</option>`).join('')}</select></label>
       <label>画幅<select name="ratio">${model.ratios.map(ratio => `<option${selected(ratio, p.ratio)}>${ratio}</option>`).join('')}</select></label>
       <label>清晰度<select name="resolution">${model.resolutions.map(value => `<option${selected(value, p.resolution)}>${value}</option>`).join('')}</select></label>
-      <label>时长（秒）${model.durations?.length ? `<select name="duration">${model.durations.map(value => `<option${selected(value, p.duration)}>${value}</option>`).join('')}</select>` : `<input type="number" name="duration" value="${esc(p.duration)}" min="${model.min}" max="${model.max}" required>`}</label></div>
+      <label>时长<select name="duration">${(model.autoDuration ? [-1] : []).concat(model.durations?.length ? model.durations : Array.from({ length: model.max - model.min + 1 }, (_, index) => model.min + index)).map(value => `<option value="${value}"${selected(value, p.duration)}>${durationLabel(value)}</option>`).join('')}</select></label></div>
     <label class="check-field"${model.audio === false ? ' hidden' : ''}><input type="checkbox" name="audio"${p.audio ? ' checked' : ''}> 生成声音</label>
     ${draft.links.length ? `<p class="field-note">参考链接 ${draft.links.length} 条${state.mode === 'mock' ? '（模拟生成）' : ''}</p>` : ''}
     ${attachmentList(draft.files)}
@@ -486,13 +558,13 @@ function empty(title, detail, symbol = 'search') {
   return `<div class="empty"><span class="card-icon">${icon(symbol, 22)}</span><strong>${title}</strong><p>${detail}</p></div>`;
 }
 
-const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '生成记录' };
+const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '生成记录', image: '图片记录' };
 
 function renderTasks() {
   main.innerHTML = `<section class="page">
     ${heading('发布任务', '查看预约时间和发布结果。')}
     <div class="tasks-layout"><div class="panel task-panel"><div class="tabs" aria-label="筛选任务">${Object.entries(tabs).map(([key, label]) => `<button data-action="task-tab" data-tab="${key}" aria-pressed="${key === state.taskTab}">${label}</button>`).join('')}</div>
-    <div class="toolbar"${state.taskTab === 'generation' ? ' hidden' : ''}><label class="search">${icon('search', 17)}<input id="task-search" aria-label="搜索作品标题" placeholder="搜索作品标题" value="${esc(state.taskSearch)}"></label>
+    <div class="toolbar"${['generation', 'image'].includes(state.taskTab) ? ' hidden' : ''}><label class="search">${icon('search', 17)}<input id="task-search" aria-label="搜索作品标题" placeholder="搜索作品标题" value="${esc(state.taskSearch)}"></label>
     <select id="task-account" aria-label="筛选目标账号"><option value="">全部账号</option>${state.accounts.map(item => `<option value="${item.id}"${selected(item.id, state.taskAccount)}>${esc(item.name)}</option>`).join('')}</select></div><div id="task-table"></div></div><aside id="task-detail" class="panel task-detail" hidden></aside></div>
   </section>`;
   updateTasks();
@@ -502,9 +574,14 @@ function updateTasks() {
   const detail = document.querySelector('#task-detail');
   if (!detail) return;
   const table = document.querySelector('#task-table');
+  if (state.taskTab === 'image') {
+    detail.hidden = true;
+    table.innerHTML = state.images.length ? `<div class="table-wrap"><table><thead><tr><th>图片任务</th><th>生成模型</th><th>张数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.images.map(task => `<tr><td><div class="task-work">${thumbnail(task.results.find(item => item.url)?.url)}<strong>${esc(task.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(imageModelName(task))}</td><td>${task.parameters.n}</td><td>${dateFormat(task.created)}</td><td>${imageBadge(task)}</td><td><button class="text-button" data-action="open-image-result" data-id="${task.id}">查看图片</button></td></tr>`).join('')}</tbody></table></div>` : empty('还没有图片生成记录', '在 BIAI Agent 描述你想生成的图片。', 'image');
+    return;
+  }
   if (state.taskTab === 'generation') {
     detail.hidden = true;
-    table.innerHTML = state.generations.length ? `<div class="table-wrap"><table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.generations.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${esc(video.parameters.duration)} 秒</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}</td><td><button class="text-button" data-action="preview-video" data-id="${video.id}">查看视频</button></td></tr>`).join('')}</tbody></table></div>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video');
+    table.innerHTML = state.generations.length ? `<div class="table-wrap"><table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${state.generations.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${durationLabel(video.parameters.duration)}</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}</td><td><button class="text-button" data-action="preview-video" data-id="${video.id}">查看视频</button></td></tr>`).join('')}</tbody></table></div>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video');
     return;
   }
   const rows = state.publications.filter(item => (state.taskTab === 'all' || item.status === state.taskTab || state.taskTab === 'publishing' && ['queued', 'queued_upstream', 'submitting'].includes(item.status)) &&
@@ -569,7 +646,7 @@ function renderSettings() {
   main.innerHTML = `<section class="page">${heading('连接设置', '连接 Smart BIAI，并选择 Agent 使用的 AI 服务。')}
     <div class="settings-grid">
     ${settingsCard('social', 'accounts', 'Smart BIAI 社媒', '查看已连接的社媒账号并发布视频。', `<label>App ID<input name="appId" required maxlength="160" value="${esc(social.appId)}" placeholder="输入 Smart BIAI App ID"></label>${secret('accessToken', social.hasSecret, 'Access Token')}`)}
-    ${settingsCard('video', 'video', 'Smart BIAI 视频生成', '在工作台生成和预览视频。', secret('apiKey', video.hasSecret, 'API Key'))}
+    ${settingsCard('video', 'image', 'Smart BIAI 图片与视频生成', '使用同一应用密钥，读取已开通的生图和视频模型。', secret('apiKey', video.hasSecret, 'API Key'))}
     ${settingsCard('ai', 'agent', '对话 AI', '选择帮你理解指令和撰写文案的 AI。', `<fieldset class="mode" aria-label="对话模型服务"><label><input type="radio" name="provider" value="deepseek"${provider === 'deepseek' ? ' checked' : ''}> DeepSeek</label><label><input type="radio" name="provider" value="doubao"${provider === 'doubao' ? ' checked' : ''}> 豆包</label></fieldset><label>模型 ID<input name="model" required maxlength="160" value="${esc(ai.model)}" placeholder="填入账号已开通的模型 ID"></label>${secret('apiKey', ai.hasSecret, 'API Key')}`)}
     </div>${renderStorageSettings(storage)}<form class="panel timezone-card" data-form="settings" data-name="preferences"><div><h2>默认时区</h2><p>新建预约时会默认使用这个时区。</p></div><label class="sr-only" for="zone-setting">默认时区</label><select id="zone-setting" name="zone">${zoneOptions(defaultZone())}</select><button class="button" type="submit">保存</button><p class="form-error" role="alert" hidden></p></form>
   </section>`;
@@ -599,17 +676,30 @@ async function sendMessage(message) {
     if (intent.accounts?.length && state.mode === 'live') for (const account of intent.accounts) upsert(state.accounts, account);
     if (intent.accountError) textEntry(intent.accountError);
     if (intent.query && !intent.accountError) textEntry(intent.accounts.length ? `找到 ${intent.accounts.length} 个匹配账号。${intent.limited ? '已查前 500 个账号，可用账号 ID 缩小范围。' : ''}` : '没有找到匹配账号，可以换一个平台或名称。', { accounts: intent.accounts });
+    if (intent.generateImage) {
+      const id = crypto.randomUUID();
+      const model = chooseModel(state.imageModels, intent.model);
+      if (!model) { textEntry(state.issues.image || '当前没有可用的生图模型，请检查连接设置。'); return; }
+      if (files.some(file => !/\.(png|jpg|jpeg|webp)$/i.test(file.name))) { textEntry('生图参考素材请使用 PNG、JPEG 或 WebP 图片。'); return; }
+      state.drafts.set(id, { id, kind: 'image', parameters: { model: model.id, prompt: intent.prompt || value, n: intent.n || 1,
+        ...(model.spec === 'size' ? { size: model.sizes[0], quality: model.qualities[0] } : { ratio: model.ratios.includes(intent.ratio) ? intent.ratio : model.ratios[0], resolution: model.resolutions[0] }) },
+        links: [], files, intent });
+      chat.push({ type: 'image-generation', id });
+    }
     if (intent.generate) {
       const id = crypto.randomUUID();
-      const model = state.models[0];
+      const model = chooseModel(state.models, intent.model, 'smartbiai-sd-2-0-mini-260619');
       if (!model) { textEntry(state.issues.video || '当前没有可用的视频模型，请检查连接设置。'); return; }
       const prompt = intent.prompt || value.split(/[，,。；;]\s*(?=明|今|后|下周|发|定时|排期)/)[0];
       const ratio = model.ratios.includes(intent.ratio) ? intent.ratio : model.ratios.includes('9:16') ? '9:16' : model.ratios[0];
       const seconds = Math.max(model.min, Math.min(model.max, intent.duration ?? 6));
-      const duration = model.durations?.length && !model.durations.includes(seconds) ? model.durations[0] : seconds;
+      const duration = intent.duration === -1 && model.autoDuration ? -1 : model.durations?.length && !model.durations.includes(seconds) ? model.durations[0] : seconds;
       const resolution = model.resolutions.includes('720p') ? '720p' : model.resolutions[0];
       state.drafts.set(id, { id, parameters: { prompt, model: model.id, ratio, resolution, duration, audio: false }, links: [], files, intent });
       chat.push({ type: 'generation', id });
+    } else if (intent.imageQuery) {
+      state.images = await request('images');
+      textEntry(state.images.length ? `已有 ${state.images.length} 组图片生成记录。` : '还没有图片生成记录，可以描述你想创作的产品图、海报或封面。', { images: Boolean(state.images.length) });
     } else if (intent.taskQuery) {
       const tasks = await request('publications');
       if (state.chat !== chat) return;
@@ -620,8 +710,8 @@ async function sendMessage(message) {
     } else if (intent.publish) {
       if (state.generations.length) textEntry('选一个已生成的视频，我会准备发布草稿。', { videos: true, intent });
       else textEntry('先生成一个视频，再准备发布。可以输入「生成一支 6 秒的竖屏产品视频」。');
-    } else if (!intent.query) {
-      textEntry(intent.message || '试试「查询 TikTok 账号」、「生成一支竖屏产品视频」或「把视频发到品牌主号」。');
+    } else if (!intent.query && !intent.generateImage) {
+      textEntry(intent.message || '试试「查询 TikTok 账号」、「生成一张产品海报」、「生成一支竖屏产品视频」或「把视频发到品牌主号」。');
     }
   } catch (error) {
     if (state.chat === chat) textEntry(error.message);
@@ -672,7 +762,26 @@ function generationFormData(form) {
 function changeDraft(form, target) {
   const draft = state.drafts.get(form.dataset.id);
   if (!draft) return;
-  if (form.dataset.form === 'generation') {
+  if (form.dataset.form === 'image-generation') {
+    const previous = draft.parameters;
+    draft.parameters = imageFormData(form);
+    if (target.name === 'model') {
+      const model = state.imageModels.find(item => item.id === target.value);
+      const p = draft.parameters;
+      if (model.spec === 'size') { p.size = model.sizes.includes(previous.size) ? previous.size : model.sizes[0]; p.quality = model.qualities.includes(previous.quality) ? previous.quality : model.qualities[0]; delete p.ratio; delete p.resolution; }
+      else { p.ratio = model.ratios.includes(previous.ratio) ? previous.ratio : model.ratios[0]; p.resolution = model.resolutions.includes(previous.resolution) ? previous.resolution : model.resolutions[0]; delete p.size; delete p.quality; }
+      if (!model.mask) p.maskFileId = null;
+    }
+    draft.credits = null;
+    if (target.name === 'model') {
+      form.outerHTML = renderImageDraft(draft);
+      document.querySelector(`[data-id="${draft.id}"] [name="model"]`)?.focus();
+    } else {
+      form.querySelector('.quote').textContent = '尚未报价';
+      const button = form.querySelector('button[type="submit"]');
+      button.textContent = '获取报价'; button.classList.remove('primary');
+    }
+  } else if (form.dataset.form === 'generation') {
     draft.parameters = generationFormData(form);
     draft.credits = null;
     form.querySelector('.quote').textContent = '尚未报价';
@@ -684,8 +793,10 @@ function changeDraft(form, target) {
       const { parameters } = draft;
       if (!model.ratios.includes(parameters.ratio)) parameters.ratio = model.ratios[0];
       if (!model.resolutions.includes(parameters.resolution)) parameters.resolution = model.resolutions[0];
-      parameters.duration = Math.max(model.min, Math.min(model.max, parameters.duration || model.min));
-      if (model.durations?.length && !model.durations.includes(parameters.duration)) parameters.duration = model.durations[0];
+      if (parameters.duration !== -1 || !model.autoDuration) {
+        parameters.duration = Math.max(model.min, Math.min(model.max, parameters.duration || model.min));
+        if (model.durations?.length && !model.durations.includes(parameters.duration)) parameters.duration = model.durations[0];
+      }
       if (model.audio === false) parameters.audio = false;
       form.outerHTML = renderGenerationDraft(draft);
       document.querySelector(`[data-id="${draft.id}"] [name="model"]`)?.focus();
@@ -710,7 +821,7 @@ function setFormError(form, message = '') {
 
 async function submitForm(form, clearSecret = false) {
   if (form.dataset.pending || state.historyBusy) return;
-  if (form.dataset.form === 'generation' && state.mode === 'live' && state.drafts.get(form.dataset.id)?.files?.length && !state.settings.storage?.ready) return;
+  if (['generation', 'image-generation'].includes(form.dataset.form) && state.mode === 'live' && state.drafts.get(form.dataset.id)?.files?.length && !state.settings.storage?.ready) return;
   form.dataset.pending = 'true';
   state.formBusy += 1;
   const button = form.querySelector('button[type="submit"], [data-confirm]');
@@ -718,12 +829,25 @@ async function submitForm(form, clearSecret = false) {
   const values = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
   const draft = state.drafts.get(form.dataset.id);
-  const parameters = kind === 'generation' ? generationFormData(form) : null;
+  const parameters = kind === 'generation' ? generationFormData(form) : kind === 'image-generation' ? imageFormData(form) : null;
   setFormError(form);
   button.disabled = true;
   controls.forEach(control => { control.disabled = true; });
   try {
-    if (kind === 'generation') {
+    if (kind === 'image-generation') {
+      if (draft.credits == null) {
+        Object.assign(draft, await request('images/quote', { ...parameters, id: draft.id }));
+        form.outerHTML = renderImageDraft(draft);
+      } else {
+        const image = await request('images', { ...parameters, id: draft.id, credits: draft.credits });
+        upsert(state.images, image);
+        const index = state.chat.findIndex(entry => entry.id === draft.id && entry.type === 'image-generation');
+        if (index >= 0) state.chat[index] = { type: 'image-result', id: image.id };
+        state.drafts.delete(draft.id);
+        renderChat();
+      }
+      saveChat();
+    } else if (kind === 'generation') {
       if (draft.credits == null) {
         const quoted = await request('quote', { ...parameters, id: draft.id });
         Object.assign(draft, quoted);
@@ -764,6 +888,9 @@ async function submitForm(form, clearSecret = false) {
       notify(clearSecret ? '已清除保存的密钥。' : '设置已保存。');
     }
   } catch (error) {
+    if (kind === 'image-generation' && error.status === 409 && /报价/.test(error.message)) {
+      draft.credits = null; form.querySelector('.quote').textContent = '尚未报价'; button.textContent = '获取报价'; button.classList.remove('primary'); saveChat();
+    }
     if (kind === 'generation' && state.mode === 'live' && error.status === 409 && /报价/.test(error.message)) {
       draft.credits = null;
       form.querySelector('.quote').textContent = '尚未报价';
@@ -823,7 +950,7 @@ function renderVideoDialog(video) {
   const activeUrl = videoDialog.querySelector('video')?.getAttribute('src');
   if (activeUrl && activeUrl === video.url) return;
   videoDialog.innerHTML = `<div class="detail-title"><h2 id="video-dialog-title">视频预览</h2><form method="dialog"><button class="icon-button" aria-label="关闭视频预览" autofocus>${icon('close')}</button></form></div>
-    <div class="video-dialog-info"><span>${esc(modelName(video))} · ${esc(video.parameters.duration)} 秒</span>${generationBadge(video)}</div>
+    <div class="video-dialog-info"><span>${esc(modelName(video))} · ${durationLabel(video.parameters.duration)}</span>${generationBadge(video)}</div>
     ${video.url ? videoPreview(video) : `<p class="empty-note">${esc(video.error || (video.status === 'completed' ? '视频链接已失效，请刷新链接。' : '当前暂无可播放的视频。'))}</p>`}
     ${video.mode === 'live' && video.status === 'completed' ? `<button type="button" class="button" data-refresh-preview>刷新链接</button>` : ''}`;
 }
@@ -851,6 +978,7 @@ videoDialog.addEventListener('close', () => {
   videoDialog.replaceChildren();
   delete videoDialog.dataset.videoId;
 });
+imageDialog.addEventListener('close', () => { if (!imageDialog.open) imageDialog.replaceChildren(); });
 
 main.addEventListener('input', event => {
   const { target } = event;
@@ -895,6 +1023,23 @@ main.addEventListener('click', async event => {
       break;
     }
     case 'open-video': offerVideo(id, JSON.parse(control.dataset.intent || '{}')); break;
+    case 'preview-image': renderImageDialog(id, Number(control.dataset.index)); break;
+    case 'open-image-result':
+      state.chat.push({ type: 'image-result', id }); saveChat();
+      if (state.page !== 'agent') location.hash = '#agent'; else renderChat();
+      break;
+    case 'refresh-image': {
+      control.disabled = true;
+      const mode = state.mode;
+      try {
+        const task = await request(`images/${id}/refresh`, {}, mode);
+        if (state.mode !== mode) break;
+        upsert(state.images, task);
+        for (const card of main.querySelectorAll(`[data-image-result="${id}"]`)) card.outerHTML = imageResultCard(id);
+      } catch (error) { notify(error.message); }
+      finally { control.disabled = false; }
+      break;
+    }
     case 'preview-video': {
       const video = findVideo(id);
       if (!video) break;
@@ -976,20 +1121,22 @@ main.addEventListener('click', async event => {
 
 async function sync() {
   const mode = state.mode;
-  const [generations, publications] = await Promise.all([request('generations', undefined, mode), request('publications', undefined, mode)]);
+  const [generations, publications, images] = await Promise.all([request('generations', undefined, mode), request('publications', undefined, mode), request('images', undefined, mode)]);
   if (mode !== state.mode) return;
   const videoChanges = generations.filter(next => {
     const prior = findVideo(next.id);
     return !prior || prior.status !== next.status || prior.url !== next.url || prior.error !== next.error;
   });
   const tasksChanged = JSON.stringify(publications) !== JSON.stringify(state.publications);
+  const imageChanges = images.filter(next => JSON.stringify(next) !== JSON.stringify(findImage(next.id)));
   state.generations = generations;
   state.publications = publications;
+  state.images = images;
   if (videoDialog.open) {
     const preview = videoChanges.find(video => video.id === videoDialog.dataset.videoId);
     if (preview) renderVideoDialog(preview);
   }
-  if (state.page === 'tasks' && (tasksChanged || videoChanges.length)) updateTasks();
+  if (state.page === 'tasks' && (tasksChanged || videoChanges.length || imageChanges.length)) updateTasks();
   if (state.page === 'accounts' && tasksChanged && document.querySelector('#account-table')) updateAccounts();
   if (state.page === 'agent' && videoChanges.length) {
     if (!state.chat.length) { renderChat(); return; }
@@ -1000,10 +1147,15 @@ async function sync() {
       if (cards.length) document.querySelector('#chat-scroll')?.scrollTo(0, document.querySelector('#chat-scroll').scrollHeight);
     }
   }
+  if (state.page === 'agent' && imageChanges.length) {
+    for (const task of imageChanges) for (const card of main.querySelectorAll(`[data-image-result="${task.id}"]`)) card.outerHTML = imageResultCard(task.id);
+  }
 }
 
 window.addEventListener('hashchange', navigate);
 async function loadMode() {
+  if (imageDialog.open) imageDialog.close();
+  if (videoDialog.open) videoDialog.close();
   modeSelect.disabled = true;
   modeSelect.value = state.mode;
   modeSelect.dataset.live = String(state.mode === 'live');
@@ -1039,7 +1191,7 @@ modeSelect.addEventListener('change', async () => {
   }
   state.mode = nextMode;
   sessionStorage.setItem(`${conversationKey}-mode`, state.mode);
-  Object.assign(state, { chat: [], drafts: new Map(), history: [], conversation: null, generations: [], publications: [], accounts: [], attachments: [], accountId: '', taskId: '', taskTab: 'all' });
+  Object.assign(state, { chat: [], drafts: new Map(), history: [], conversation: null, generations: [], images: [], models: [], imageModels: [], publications: [], accounts: [], attachments: [], accountId: '', taskId: '', taskTab: 'all' });
   await loadMode();
   state.historyBusy = false;
   renderConversationHistory();

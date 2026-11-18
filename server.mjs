@@ -7,8 +7,10 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { parseEnv } from 'node:util';
-import { accounts, generationResult, interpret, models } from './mock.mjs';
-import { mediaUrl, socialClient, understand, videoClient } from './integrations.mjs';
+import { accounts, generationResult, interpret, models, imageModels } from './mock.mjs';
+import { socialClient, understand, videoClient, imageClient } from './integrations.mjs';
+import { videoParameters, validateVideoReferences, mockVideoCredits } from './generation-models.js';
+import { createImageJobs } from './image-jobs.mjs';
 import { createLiveJobs, migrateLive } from './live-jobs.mjs';
 import { webAccess } from './web-access.mjs';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
@@ -237,32 +239,10 @@ function publicationView(row) {
 }
 
 function generationParameters(body, catalog, live) {
-  const model = catalog.find(item => item.id === body.model);
-  if (!model || !model.ratios.includes(body.ratio) || !model.resolutions.includes(body.resolution) ||
-      !Number.isInteger(body.duration) || (model.durations?.length ? !model.durations.includes(body.duration) : body.duration < model.min || body.duration > model.max)) {
-    fail(400, '请选择模型支持的比例、清晰度和时长。');
-  }
-  if (typeof body.audio !== 'boolean') fail(400, '请选择是否生成声音。');
-  const prompt = validateText(body.prompt, model.maxPrompt ?? (model.name.endsWith('Lite') ? 2000 : 20000), '视频提示词');
-  const minPrompt = model.minPrompt ?? (model.name.endsWith('Lite') ? 10 : 1);
-  if (prompt.length < minPrompt) fail(400, `所选模型的提示词至少需要 ${minPrompt} 个字符。`);
-  const parameters = { prompt, model: model.id, ratio: body.ratio, resolution: body.resolution, duration: body.duration, audio: body.audio };
-  if (!live) return parameters;
-  if (body.audio && !model.audio) fail(400, '所选模型不支持生成声音。');
-  if (body.references != null) {
-    if (!Array.isArray(body.references) || body.references.length > 9) fail(400, '请检查参考链接。');
-    parameters.references = body.references.map(reference => {
-      const url = mediaUrl(reference?.url);
-      if (!url || !['image', 'video', 'audio'].includes(reference.type)) fail(400, '请添加可识别类型的公网 HTTPS 参考链接。');
-      return { type: reference.type, url };
-    });
-  } else parameters.references = [];
-  if (body.fileIds !== undefined && (!Array.isArray(body.fileIds) || body.fileIds.length + parameters.references.length > 9)) fail(400, '请检查参考素材数量。');
-  parameters.fileIds = (body.fileIds ?? []).map(validId);
-  return parameters;
+  return videoParameters(body, catalog, live);
 }
 
-function mockCredits(body) { return body.duration * (body.resolution === '720p' ? 6 : 4); }
+function mockCredits(body) { return mockVideoCredits(body); }
 
 function timezone(value) {
   const zone = validateText(value, 80, '时区');
@@ -460,6 +440,7 @@ function configure(name, body) {
 
 const liveJobs = createLiveJobs(database, configuration, lateWindow);
 let modelCache;
+let imageModelCache;
 
 async function liveModels(connection = configuration('video')) {
   if (modelCache?.scope === connection.scope && modelCache.until > Date.now()) return modelCache.list;
@@ -468,18 +449,42 @@ async function liveModels(connection = configuration('video')) {
   return list;
 }
 
+async function liveImageModels(connection = configuration('video')) {
+  if (imageModelCache?.scope === connection.scope && imageModelCache.until > Date.now()) return imageModelCache.list;
+  const list = await imageClient(connection).models();
+  imageModelCache = { scope: connection.scope, list, until: Date.now() + 60_000 };
+  return list;
+}
+
+const imageJobs = createImageJobs(database, {
+  connection: () => configuration('video'), models: liveImageModels,
+  async prepareFiles(ids, model, mask = false) {
+    for (const id of ids) {
+      const file = await getUpload(id);
+      const extension = extname(file.name).toLowerCase().slice(1);
+      const format = extension === 'jpg' ? 'jpeg' : extension;
+      if (!['png', 'jpeg', 'webp'].includes(format) || mask && format !== 'png' ||
+          model.capabilities.input_formats?.length && !model.capabilities.input_formats.includes(format)) fail(400, mask ? '蒙版请使用带透明区域的 PNG 图片。' : '参考图片请使用模型支持的 PNG、JPEG 或 WebP 文件。');
+      if (file.size > (model.capabilities.image_max_mb ?? 50) * 1024 * 1024) fail(400, '参考图片超过所选模型的文件大小限制。');
+      await previewImageType(file.path, file.name);
+    }
+    return attachmentReferences(ids);
+  }
+});
+
 async function bootstrap(mode) {
   const settings = Object.fromEntries(Object.keys(groups).map(name => [name, settingView(name)]));
   settings.storage = storageView();
-  if (mode === 'mock') return { mode, accounts, models, settings, issues: {} };
-  const [social, video] = await Promise.allSettled([Promise.resolve().then(() => socialClient(configuration('social')).accounts()), liveModels()]);
+  if (mode === 'mock') return { mode, accounts, models, imageModels, settings, issues: {} };
+  const [social, video, image] = await Promise.allSettled([Promise.resolve().then(() => socialClient(configuration('social')).accounts()), liveModels(), liveImageModels()]);
   const found = social.status === 'fulfilled' ? social.value.accounts : [];
   const catalog = video.status === 'fulfilled' ? video.value : [];
   return {
-    mode, accounts: found, models: catalog, settings,
+    mode, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
     issues: {
       social: social.status === 'rejected' ? social.reason.message : social.value.limited ? '当前已加载前 500 个账号，可在 Agent 按账号 ID 或平台查询。' : '',
-      video: video.status === 'rejected' ? video.reason.message : catalog.length ? '' : '已连接视频服务，请在 Smart BIAI 开通 Mini 或 Lite 模型。',
+      video: video.status === 'rejected' ? video.reason.message : catalog.length ? '' : '已连接生成服务，请在 Smart BIAI 开通视频模型。',
+      image: image.status === 'rejected' ? image.reason.message : image.value.length ? '' : '当前应用尚无可用的生图模型，请在 Smart BIAI 开通图片模型。',
       ai: settings.ai.ready ? '' : '请在连接设置填写 DeepSeek 或豆包的模型 ID 和 API Key。'
     }
   };
@@ -511,13 +516,14 @@ async function estimate(body, mode) {
   if (getGeneration.get(id)) fail(409, '该草稿已有生成任务，请查看生成记录。');
   const connection = configuration('video');
   const catalog = await liveModels(connection);
-  if (!catalog.length) fail(422, '当前无法使用 Mini 或 Lite，请在 Smart BIAI 开通其中一个模型。');
+  if (!catalog.length) fail(422, '当前应用没有可用的视频模型，请在 Smart BIAI 开通视频模型。');
   const parameters = generationParameters(body, catalog, true);
   const model = catalog.find(item => item.id === parameters.model);
   const payload = { prompt: parameters.prompt, model: parameters.model, aspect_ratio: parameters.ratio, resolution: parameters.resolution, duration: parameters.duration };
   if (model.audio) payload.generate_audio = parameters.audio;
   if (model.lastFrame) payload.return_last_frame = true;
   const references = [...parameters.references, ...await attachmentReferences(parameters.fileIds)];
+  validateVideoReferences(references, model, parameters.ratio);
   if (references.length) payload.references = references;
   const credits = await videoClient(connection).quote(payload);
   if (credits < 1 || credits > 2_000_000_000) fail(422, '本次报价无法建立明确的费用上限，请调整生成参数。');
@@ -576,8 +582,8 @@ function saveConversation(mode, id, body) {
     fail(400, '对话内容有误，无法保存。');
   }
   for (const entry of chat) {
-    if (!entry || !['user', 'text', 'generation', 'result', 'publication', 'confirmed', 'tasks'].includes(entry.type)) fail(400, '无法保存这条对话消息。');
-    if (['generation', 'result', 'publication', 'confirmed'].includes(entry.type)) validId(entry.id);
+    if (!entry || !['user', 'text', 'generation', 'result', 'image-generation', 'image-result', 'publication', 'confirmed', 'tasks'].includes(entry.type)) fail(400, '无法保存这条对话消息。');
+    if (['generation', 'result', 'image-generation', 'image-result', 'publication', 'confirmed'].includes(entry.type)) validId(entry.id);
     if (entry.type === 'tasks' && (!Array.isArray(entry.ids) || entry.ids.some(taskId => typeof taskId !== 'string'))) fail(400, '无法保存任务卡片。');
     if (entry.accounts !== undefined && (!Array.isArray(entry.accounts) || entry.accounts.some(account => !account || typeof account.id !== 'string'))) fail(400, '无法保存账号卡片。');
     validateAttachedFiles(entry.files);
@@ -592,7 +598,7 @@ function saveConversation(mode, id, body) {
   }
   const firstMessage = chat.find(item => item.type === 'user');
   const subject = (typeof firstMessage?.text === 'string' ? firstMessage.text.trim() : '') || firstMessage?.files?.[0]?.name;
-  const title = subject?.replace(/\s+/g, ' ').trim().slice(0, 48) || '视频和发布草稿';
+  const title = subject?.replace(/\s+/g, ' ').trim().slice(0, 48) || '图片、视频和发布草稿';
   const content = JSON.stringify({ chat, drafts });
   const now = Date.now();
   const result = revision === 0
@@ -613,6 +619,8 @@ async function api(request, path) {
     if (path === '/api/conversations') return database.prepare('SELECT id, title, revision, updated FROM conversation WHERE mode = ? ORDER BY updated DESC').all(mode);
     if (conversation) return conversationView(database.prepare('SELECT * FROM conversation WHERE mode = ? AND id = ?').get(mode, validId(conversation[1])));
     if (path === '/api/bootstrap') return bootstrap(mode);
+    if (path === '/api/images') return imageJobs.list(mode);
+    if (/^\/api\/images\/[a-f\d-]+$/i.test(path)) return imageJobs.get(path.split('/').at(-1), mode);
     if (path === '/api/generations') return database.prepare('SELECT * FROM generation WHERE mode = ? ORDER BY created DESC').all(mode).map(row => generationView(row, mode));
     if (path.startsWith('/api/generations/')) return generationView(getGeneration.get(path.slice(17)), mode);
     if (path === '/api/publications') return database.prepare('SELECT * FROM publication WHERE mode = ? ORDER BY created DESC').all(mode).map(publicationView);
@@ -623,6 +631,10 @@ async function api(request, path) {
     if (path === '/api/settings/storage') return configureStorage(body);
     if (path === '/api/agent') return agent(body, mode);
     if (path === '/api/quote') return estimate(body, mode);
+    if (path === '/api/images/quote') return imageJobs.quote(body, mode);
+    if (path === '/api/images') return imageJobs.create(body, mode);
+    const imageRefresh = path.match(/^\/api\/images\/([a-f\d-]+)\/refresh$/i);
+    if (imageRefresh) return imageJobs.refresh(imageRefresh[1], mode);
     if (path === '/api/generations') return createGeneration(body, mode);
     const refresh = path.match(/^\/api\/generations\/([a-f\d-]+)\/refresh$/i);
     if (refresh) {
@@ -732,4 +744,5 @@ setInterval(() => {
   try { advanceJobs(); }
   catch (error) { console.error('Worker update failed:', error.code || error.name); }
   void liveJobs.run().catch(error => console.error('Live Worker update failed:', error.code || error.name));
+  void imageJobs.run().catch(error => console.error('Image Worker update failed:', error.code || error.name));
 }, 1000).unref();

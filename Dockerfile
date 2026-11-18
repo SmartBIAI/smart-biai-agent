@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 COPY server.mjs integrations.mjs live-jobs.mjs mock.mjs media-storage.mjs web-access.mjs ./
+COPY image-jobs.mjs generation-models.js ./
 COPY web/index.html web/app.js web/styles.css ./web/
 COPY web/demo-assets/sample-video.mp4 web/demo-assets/sample-cover.jpg ./web/demo-assets/
 COPY LICENSE ./
