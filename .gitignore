@@ -8,13 +8,12 @@ uploads/
 .media-link-key
 .env
 .env.*
-!/doc/.env.example
 !/deploy/.env.example
 /deploy/data/
+/biai-agent-backup-*.tar.gz
 
-# Local references and design materials pending publication review.
-/doc/SmartBIAI接口文档-内部Claw对接.md
-/doc/DEEPSEEK_DOUBAO_API_INTEGRATION.md
-/doc/产品说明.md
-/doc/设计与实现方案.md
-/doc/design/
+# Public documentation and its configuration template.
+/doc/*
+!/doc/.env.example
+!/doc/部署说明.md
+!/doc/宝塔Docker首次部署.md

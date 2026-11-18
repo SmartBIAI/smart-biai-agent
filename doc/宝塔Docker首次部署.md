@@ -1,83 +1,60 @@
-# 宝塔服务器首次部署 BIAI Agent 完整应用
+# Docker 部署指南
 
-部署后可以使用自己的 Smart BIAI 和对话 AI 密钥，查询真实账号、上传参考素材、生成视频和确认发布。默认正式入口是 `https://developer.biaibiai.com/smart-biai-agent-app/`，现有公开体验页位于 `/smart-biai-agent/`。本指南按宝塔 Nginx 在宿主机、Open API 已通过 Docker 运行的环境编写。
+本指南从公开仓库构建镜像，使用 Docker Compose 运行一个持久化的共享工作台，并通过 Nginx 提供 HTTPS 访问。宝塔用户可在站点配置页面应用同样的代理规则。
 
-## 1. 准备与上传
+## 环境要求
 
-服务器需要 Linux x86_64、Docker Engine 和 Docker Compose V2。宿主机无需安装 Node.js。宝塔终端或 SSH 执行：
+- Linux 服务器，安装 Docker Engine、Docker Compose V2 和 Git。
+- 一个可用的域名和 HTTPS 证书。
+- 服务器能够访问 npm 软件源、Smart BIAI 和所选 AI 服务。
+- 当前用户有 Docker 使用权限，以及部署目录的读写权限。
 
-```bash
-uname -m
-docker version
-docker compose version
-```
+以下域名使用 `agent.example.com`，应用路径使用 `/smart-biai-agent-app/`，请将域名替换为自己的域名。路径与仓库自带的 Compose 和 Nginx 示例一致。
 
-`uname -m` 应显示 `x86_64`。如果 Compose 使用独立命令，执行 `docker-compose version`，版本需为 2.x。启动脚本同时支持这两种调用方式。ARM 服务器需要另行构建对应架构镜像。
+## 构建并准备配置
 
-通过宝塔「文件」把以下两个文件上传到 `/opt/biai_packages/`：
-
-- `smart-biai-agent-docker-0.1.0-linux-amd64.tar.gz`
-- `smart-biai-agent-docker-0.1.0-linux-amd64.tar.gz.sha256`
-
-压缩包包含 Linux 镜像 `images.tar`、Compose 配置、环境模板、启动脚本、Nginx 配置示例和本指南。密钥由部署者在服务器上填写。
-
-直接从 GitHub 源码构建的方式也可用：在源码目录执行 `docker build --platform linux/amd64 -t smart-biai-agent:0.1.0-docker.1 .`，将 `deploy/` 中的配置文件复制到独立的运行目录后，按本指南继续。离线包已包含镜像，可直接导入。
-
-## 2. 解压并填写设置
-
-首次安装目录为 `/opt/smart-biai-agent-app/`，其中的 `data/` 将保存数据库、历史对话、上传附件和加密配置。先确认该目录未用于另一套部署，再执行：
-
-```bash
-mkdir -p /opt/biai_packages
-cd /opt/biai_packages
-sha256sum -c smart-biai-agent-docker-0.1.0-linux-amd64.tar.gz.sha256
-tar -xzf smart-biai-agent-docker-0.1.0-linux-amd64.tar.gz -C /opt
-cd /opt/smart-biai-agent-app
-sha256sum -c SHA256SUMS
+```sh
+git clone https://github.com/SmartBIAI/smart-biai-agent.git
+cd smart-biai-agent
+docker build -t smart-biai-agent:0.1.0-docker.1 .
+cd deploy
 cp .env.example .env
 chmod 600 .env
 ```
 
-在宝塔文件编辑器中打开 `/opt/smart-biai-agent-app/.env`。至少修改下面的访问设置：
+编辑 `deploy/.env` 中的访问设置。
 
 ```dotenv
-BIAI_PUBLIC_ORIGIN=https://developer.biaibiai.com
+BIAI_PUBLIC_ORIGIN=https://agent.example.com
 BIAI_BASE_PATH=/smart-biai-agent-app
 BIAI_BIND_PORT=4178
 BIAI_LOGIN_USER=admin
 BIAI_LOGIN_PASSWORD=CHANGE_ME_BEFORE_START
 ```
 
-把密码占位符换成至少 16 位的独立密码。可以在终端运行 `openssl rand -hex 24` 生成后复制进去。用户名只用英文字母、数字、下划线、短横线或点。API 密钥可稍后在登录后的「连接设置」填写。
+将密码占位符替换为至少 16 位的独立密码，可用 `openssl rand -hex 24` 生成。用户名支持英文字母、数字、下划线、短横线和点。这个账号可访问该实例全部对话、任务和连接设置。
 
-如果在 `.env` 填写服务密钥，使用模板已有的变量名。选择 DeepSeek 时填写 `DEEPSEEK_API_KEY` 和 `DEEPSEEK_MODEL`；选择豆包时把 `BIAI_AI_PROVIDER` 改成 `doubao`，再填写 `ARK_API_KEY`、`DOUBAO_MODEL`。社媒服务填写 `BIAI_SOCIAL_APP_ID`、`BIAI_SOCIAL_ACCESS_TOKEN`，视频服务填写 `BIAI_VIDEO_API_KEY`。这些变量也可留空，先通过模拟模式验收安装。
+API 信息可以在此文件填写，也可启动并登录后在「连接设置」填写。变量列表见 [使用与配置](部署说明.md#配置-api-服务)。
 
-这是一套共享管理员工作台。知道访问账号和密码的人可以查看此实例的全部账号、对话和任务，并修改连接设置。
+## 启动
 
-## 3. 导入镜像并启动
+在 `deploy/` 目录执行以下命令。
 
-```bash
-cd /opt/smart-biai-agent-app
+```sh
 sh start.sh
-```
-
-脚本会导入离线镜像、检查访问账号和路径配置、创建持久化目录并启动容器。镜像里的进程以 UID 1000 的普通用户运行，首次创建的数据目录会设置成相应权限。
-
-启动后检查：
-
-```bash
 curl -fsS http://127.0.0.1:4178/healthz
 docker compose -f compose.yml ps
-docker compose -f compose.yml logs --tail 50 agent
 ```
 
-独立版 Compose 用户将上面和下文中的 `docker compose` 换成 `docker-compose`。健康接口应返回 `{"status":"ok"}`。容器的健康状态通常会在半分钟内变成 `healthy`。
+启动脚本会检查配置、创建 `deploy/data/` 并启动容器。应用以 UID 1000 的用户运行，首次创建的数据目录会配置相应权限。健康检查应返回 `{"status":"ok"}`。
 
-宿主端口默认绑定到 `127.0.0.1:4178`，由宝塔 Nginx 对外提供 HTTPS。如果 4178 被占用，修改 `.env` 中的 `BIAI_BIND_PORT` 和下一步的 Nginx 目标端口后，再执行 `sh start.sh`。
+若使用独立的 `docker-compose` 命令，下文将 `docker compose` 替换为 `docker-compose`。启动脚本支持这两种调用方式。
 
-## 4. 配置宝塔 Nginx
+容器端口映射到宿主机的 `127.0.0.1:4178`，由 Nginx 对外提供 HTTPS。端口被占用时，修改 `BIAI_BIND_PORT` 并同步修改代理目标端口。
 
-打开「网站 → developer.biaibiai.com → 配置文件」。备份当前内容，把下面两段加到域名的 HTTPS `server { ... }` 中，与现有 `location` 同级：
+## 配置 HTTPS 代理
+
+将域名解析到服务器，在 Nginx 中为该域名配置 HTTPS。宝塔用户进入「网站 → 自己的域名 → 配置文件」，在 HTTPS `server { ... }` 中加入以下两段，与其他 `location` 同级。
 
 ```nginx
 location = /smart-biai-agent-app {
@@ -103,41 +80,43 @@ location ^~ /smart-biai-agent-app/ {
 }
 ```
 
-`proxy_pass` 后面的端口没有末尾斜杠，转发时会保留 `/smart-biai-agent-app/` 前缀，应用据此识别请求。`Host` 与 `BIAI_PUBLIC_ORIGIN` 的域名一致。`Authorization` 用于工作台的访问登录。
+配置文件示例也见 [`deploy/baota-nginx.conf.example`](../deploy/baota-nginx.conf.example)。`proxy_pass` 保留原请求路径，`Host` 与 `BIAI_PUBLIC_ORIGIN` 的域名一致。
 
-在宝塔保存前检查配置：
+执行 `nginx -t`，通过后重载 Nginx。宝塔默认安装可使用 `/www/server/nginx/sbin/nginx -t`，再在面板重载。若 Nginx 运行在容器中，需要让它能够访问应用容器，并按实际容器网络设置 `proxy_pass`。
 
-```bash
-/www/server/nginx/sbin/nginx -t
+打开 `https://agent.example.com/smart-biai-agent-app/`，在浏览器弹出的登录窗口中输入工作台账号和密码。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。
+
+## 连接与验收
+
+1. 先用模拟模式查账号、生成示例视频并确认模拟发布，检查刷新后是否能恢复记录。
+2. 在「连接设置」填写 Smart BIAI 社媒 App ID、Access Token、视频 API Key，以及 DeepSeek 或豆包配置。
+3. 切到真实模式，确认授权账号和可用视频模型能够加载。查看生成报价后再确认真实生成。
+4. 参考素材选择 OSS 或本地文件服务器。选择本地方式时，填写自己的公网 HTTPS 域名，容器附件目录留空。应用会为素材生成带路径前缀的限时链接。
+5. 视频生成后先预览，选定有发布权限的测试账号，检查文案和时间，再确认发布。
+
+## 数据和运行管理
+
+`deploy/data/` 保存数据库、对话、附件和加密密钥，`deploy/.env` 保存启动配置。容器重建时沿用这两个位置即可继续读取记录。自定义附件目录应位于持久化挂载内，例如 `/data/uploads`。
+
+修改 `.env` 后在 `deploy/` 目录重新执行 `sh start.sh`。查看状态和日志可使用以下命令。
+
+```sh
+docker compose -f compose.yml ps
+docker compose -f compose.yml logs --tail 50 agent
+docker compose -f compose.yml restart agent
 ```
 
-通过后在宝塔重载 Nginx。访问 `https://developer.biaibiai.com/smart-biai-agent-app/`，浏览器会弹出账号密码窗口，输入 `.env` 中的工作台访问账号和密码。该登录通过 HTTPS 传输。
+定时发布需要容器持续运行。停机后的补交规则见 [数据、排期和备份](部署说明.md#数据排期和备份)。
 
-如希望完整应用使用原 `/smart-biai-agent/` 地址，将 `BIAI_BASE_PATH` 及以上两段路径统一改成 `/smart-biai-agent`，并将原静态体验的同名 `location` 替换为这两段，再执行 `sh start.sh`。同一个路径只能配置一个入口。
+## 备份和更新
 
-## 5. 首次验收与真实连接
+在 `deploy/` 目录执行以下命令，将数据和环境配置备份到父目录，备份完成后恢复服务。
 
-1. 登录后先选「模拟模式」，查账号、生成示例视频、确认一次模拟发布。刷新后应能恢复历史对话。
-2. 在「连接设置」配置 Smart BIAI 社媒、视频及 DeepSeek 或豆包。切到「真实模式」，确认账号和视频模型可以加载。
-3. 对话上传参考图片时，可以选择 OSS。输入 Bucket、地域和密钥，或在 `.env` 填写 `OSS_*` 变量。访问浏览器的文件先上传到工作台，点击「准备素材并报价」后才将所选素材上传到 OSS。
-4. 选择本地文件服务器时，公网域名填 `https://developer.biaibiai.com`，附件目录留空。应用会自动生成带 `/smart-biai-agent-app/media/` 前缀的限时链接。该路径验证签名后供 Smart BIAI 取件，工作台其他路径要求登录。外部取件需要服务器的 HTTPS 可达。
-5. 确认报价后才会消耗额度生成视频。预览完成后选择测试账号并单独确认发布。只有状态为 `20` 已授权的可用账号可以发布。定时任务依赖容器保持运行。
-6. 检查原来的 `/docs`、Open API 接口和 `/smart-biai-agent/` 公开体验页仍可按当前配置使用。
-
-## 6. 数据、备份和重启
-
-`.env` 改动后执行 `sh start.sh`，Compose 会按新环境重新创建容器。数据库和附件位于部署目录的 `data/`，保留该目录和 `.env`，重建容器后仍可读取。连接页保存的密钥保存在数据库中，并使用数据目录里的密钥文件加密。
-
-停机备份示例：
-
-```bash
-cd /opt/smart-biai-agent-app
-install -d -m 0700 /opt/biai_backups
+```sh
 docker compose -f compose.yml stop agent
-archive="/opt/biai_backups/biai-agent-$(date +%Y%m%d-%H%M%S).tar.gz"
 umask 077
-if tar -czf "$archive" data .env compose.yml; then
-    chmod 600 "$archive"
+backup_file="../biai-agent-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+if tar -czf "$backup_file" data .env compose.yml; then
     docker compose -f compose.yml up -d
 else
     docker compose -f compose.yml up -d
@@ -145,18 +124,26 @@ else
 fi
 ```
 
-恢复时先停止实例，再用同一份备份还原数据目录和环境配置。共享管理员登录状态由浏览器管理，改密码后会要求重新输入。
+备份成功后更新源码、重建镜像并启动。
 
-## 7. 常见问题
+```sh
+cd ..
+git pull --ff-only
+docker build -t smart-biai-agent:0.1.0-docker.1 .
+cd deploy
+docker compose -f compose.yml up -d --force-recreate
+curl -fsS http://127.0.0.1:4178/healthz
+```
+
+恢复备份前先停止实例，再还原匹配的数据和环境配置。备份包含服务密钥和业务记录，应限制访问权限。
+
+## 常见问题
 
 | 现象 | 处理 |
 | --- | --- |
-| 启动提示修改密码 | 编辑 `.env` 中的访问账号和密码，保存后重新执行 `sh start.sh`。 |
-| 宝塔访问 502 | 查容器状态、`/healthz`、Nginx 转发端口及日志。 |
-| 访问 403 或保存设置提示来源无效 | 核对 `BIAI_PUBLIC_ORIGIN` 与浏览器实际 HTTPS 域名一致，Nginx 保留 `Host`。 |
-| 页面打开但资源 404 | 检查路径前缀、URL 末尾斜杠和 `proxy_pass` 配置。 |
-| 数据目录权限不足 | 首次目录应由脚本创建。自备目录需让容器 UID 1000 有读写权限。 |
-| 模型或账号加载失败 | 检查各类密钥、应用授权和出站网络。 |
-| 登录失效或重复弹窗 | 检查输入的工作台密码，以及是否有其他网关覆盖 `Authorization`。 |
-
-部署包按 Linux amd64 构建。服务器端和本机的真实服务配置相互独立，需要在新实例重新填写连接信息。
+| 启动提示修改密码 | 替换 `.env` 中的密码占位符后重新启动。 |
+| Nginx 返回 502 | 检查容器状态、健康接口和代理目标端口。 |
+| 请求返回 403 | 检查公网域名、`BIAI_PUBLIC_ORIGIN` 和转发的 `Host` 是否一致。 |
+| 页面资源返回 404 | 检查 URL 路径前缀、末尾斜杠和 Nginx 代理规则。 |
+| 数据目录无写入权限 | 确认容器 UID 1000 可以读写数据目录。 |
+| 登录窗口反复弹出 | 核对访问密码及代理是否正确传递 `Authorization`。 |

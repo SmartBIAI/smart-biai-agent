@@ -1,4 +1,4 @@
-# Add inside the existing developer.biaibiai.com HTTPS server block.
+# Add inside your domain's HTTPS server block.
 location = /smart-biai-agent-app {
     return 308 /smart-biai-agent-app/;
 }
