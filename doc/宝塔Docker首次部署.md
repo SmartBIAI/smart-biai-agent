@@ -86,6 +86,14 @@ location ^~ /smart-biai-agent-app/ {
 
 打开 `https://agent.example.com/smart-biai-agent-app/`，在浏览器弹出的登录窗口中输入工作台账号和密码。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。
 
+### 自定义访问路径
+
+例如，希望正式应用位于 `/smart-biai-agent/`，首次启动前将 `.env` 中的 `BIAI_BASE_PATH` 改为 `/smart-biai-agent`，并让 Nginx 的两个 `location` 使用同一路径。`proxy_pass` 保留完整请求路径，端口后省略末尾斜杠。
+
+`BIAI_PUBLIC_ORIGIN` 和 `BIAI_MEDIA_PUBLIC_ORIGIN` 只填写 HTTPS 域名。URL 前缀与部署目录、数据目录分别配置。静态体验版使用相对资源路径，迁移到新 URL 时调整 Nginx 的路径即可。
+
+已经启动的实例更改 `.env` 后，需要在部署目录执行 `sh start.sh`，让容器读取新配置。
+
 ## 连接与验收
 
 1. 先用模拟模式查账号、生成示例视频并确认模拟发布，检查刷新后是否能恢复记录。

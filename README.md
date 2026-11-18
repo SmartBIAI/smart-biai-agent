@@ -2,7 +2,7 @@
 
 基于 Smart BIAI OpenAPI 的自托管 AI 工作台，在对话中查询海外社媒账号、生成视频、编辑文案，并确认立即发布或预约发布。
 
-[在线体验](https://developer.biaibiai.com/smart-biai-agent/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [视频 API 文档](https://developer.biaibiai.com/docs)
+[在线体验](https://developer.biaibiai.com/smart-biai-agent-static/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [视频 API 文档](https://developer.biaibiai.com/docs)
 
 在线体验使用模拟数据，记录保存在当前浏览器。部署自己的工作台后，可以填写个人或团队的 API 凭证，使用真实服务。
 
