@@ -10,8 +10,10 @@ import { parseEnv } from 'node:util';
 import { accounts, generationResult, interpret, models } from './mock.mjs';
 import { mediaUrl, socialClient, understand, videoClient } from './integrations.mjs';
 import { createLiveJobs, migrateLive } from './live-jobs.mjs';
+import { webAccess } from './web-access.mjs';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
+const access = webAccess(process.env);
 const directory = resolve(process.env.BIAI_DATA_DIR || fileURLToPath(new URL('./.data/', import.meta.url)));
 const filesDirectory = resolve(directory, 'uploads');
 mkdirSync(directory, { recursive: true });
@@ -419,7 +421,7 @@ async function attachmentReferences(ids) {
   if (config.provider === 'local') {
     const origin = httpsOrigin(config.publicOrigin);
     if (!origin) fail(422, '请在连接设置填写文件服务的公网 HTTPS 域名，或改用 OSS。');
-    return files.map(file => ({ type: mediaTypes[extname(file.name).toLowerCase()][0], url: signedLocalMedia(file, origin, directory) }));
+    return files.map(file => ({ type: mediaTypes[extname(file.name).toLowerCase()][0], url: signedLocalMedia(file, origin, directory, access.basePath) }));
   }
   if (!config.accessKeyId || !config.accessKeySecret || !config.bucket || !config.region) fail(422, '请补齐 OSS 密钥、Bucket 和地域。');
   return ossReferenceLinks({ ...config, endpoint: ossEndpoint(config.endpoint), customDomain: httpsOrigin(config.customDomain), prefix: storagePrefix(config.prefix) }, files);
@@ -651,26 +653,39 @@ const assets = new Map([
   ['/app.js', ['app.js', 'text/javascript']],
   ['/styles.css', ['styles.css', 'text/css']]
 ]);
-const port = Number(process.env.PORT || 4173);
-const host = '127.0.0.1';
-const allowedHosts = new Set([`${host}:${port}`, `localhost:${port}`]);
+const { port, host } = access;
 
 const server = createServer(async (request, response) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Referrer-Policy', 'no-referrer');
   response.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; img-src 'self' https: data:; media-src https:; form-action 'self'");
   try {
-    if (!allowedHosts.has(request.headers.host)) fail(403, '请通过本机地址访问。');
-    if (request.method === 'POST' && request.headers.origin && request.headers.origin !== `http://${request.headers.host}`) {
-      fail(403, '请求来源无效。');
-    }
+    if (!access.validHost(request.headers.host)) fail(403, '访问域名与工作台配置不一致。');
     const url = new URL(request.url, 'http://localhost');
-    const path = url.pathname;
+    if (url.pathname === '/healthz' && request.method === 'GET') {
+      database.prepare('SELECT 1').get();
+      response.setHeader('Content-Type', 'application/json');
+      response.end('{"status":"ok"}');
+      return;
+    }
+    const path = access.path(url.pathname);
+    if (access.basePath && url.pathname === access.basePath && request.method === 'GET') {
+      response.writeHead(308, { Location: `${access.basePath}/${url.search}` });
+      response.end();
+      return;
+    }
+    if (path === null) fail(404, '找不到这个页面。');
     const shared = path.match(/^\/media\/([a-f\d-]+)(\.[a-z0-9]+)$/);
     if (shared && ['GET', 'HEAD'].includes(request.method)) {
       await sendSharedMedia(request, response, url, shared);
       return;
     }
+    if (!access.authorized(request.headers.authorization)) {
+      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="BIAI Agent", charset="UTF-8"', 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('请使用工作台访问账号和密码登录。');
+      return;
+    }
+    if (request.method === 'POST' && !access.validOrigin(request.headers.origin)) fail(403, '请求来源无效。');
     const upload = path.match(/^\/api\/files\/([a-f\d-]+)(\/preview)?$/i);
     if (request.method === 'GET' && upload) {
       response.setHeader('Cache-Control', 'no-store');
@@ -680,6 +695,7 @@ const server = createServer(async (request, response) => {
     if (request.method === 'GET' && assets.has(path)) {
       const [file, type] = assets.get(path);
       response.setHeader('Content-Type', `${type}; charset=utf-8`);
+      response.setHeader('Cache-Control', 'no-store');
       response.end(readFileSync(new URL(`./web/${file}`, import.meta.url)));
       return;
     }
@@ -701,7 +717,7 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => console.log(`BIAI Agent · http://${host}:${port}`));
+server.listen(port, host, () => console.log(`BIAI Agent · http://${host}:${port}${access.basePath}/`));
 setInterval(() => {
   try { advanceJobs(); }
   catch (error) { console.error('Worker update failed:', error.code || error.name); }

@@ -57,8 +57,8 @@ function signature(key, path, expires) {
   return createHmac('sha256', key).update(`${path}:\n${expires}`).digest('hex');
 }
 
-export function signedLocalMedia(file, origin, directory) {
-  const path = mediaPath(file);
+export function signedLocalMedia(file, origin, directory, basePath = '') {
+  const path = basePath + mediaPath(file);
   const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
   const sig = signature(signingKey(directory, true), path, expires);
   return `${origin}${path}?expires=${expires}&sig=${sig}`;

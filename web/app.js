@@ -20,7 +20,8 @@ const icons = {
 const icon = (name, size = 19) => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" stroke-linecap="round">${icons[name]}</svg>`;
 const demoOptions = document.documentElement.dataset;
 const publicDemo = demoOptions.publicDemo === 'true';
-const conversationKey = publicDemo ? `biai-demo:${new URL('.', import.meta.url).pathname}` : 'biai';
+const appPath = new URL('.', import.meta.url).pathname;
+const conversationKey = publicDemo ? `biai-demo:${appPath}` : appPath === '/' ? 'biai' : `biai:${appPath}`;
 const demoRequest = publicDemo ? (await import('./demo.js')).createDemoRequest({
   storage: localStorage, key: `${conversationKey}-data`, sampleVideo: demoOptions.sampleVideo, sampleCover: demoOptions.sampleCover
 }) : null;
@@ -42,7 +43,7 @@ const state = {
   page: '', accounts: [], models: [], settings: {}, generations: [], publications: [],
   chat: [], drafts: new Map(), intentBusy: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
   taskTab: 'all', taskId: '', taskSearch: '', taskAccount: '', loaded: false,
-  mode: !publicDemo && sessionStorage.getItem('biai-mode') === 'live' ? 'live' : 'mock', issues: {},
+  mode: !publicDemo && sessionStorage.getItem(`${conversationKey}-mode`) === 'live' ? 'live' : 'mock', issues: {},
   history: [], conversation: null, historyBusy: false
 };
 const modeSelect = document.querySelector('#run-mode');
@@ -140,7 +141,7 @@ function zoneOptions(value) {
 async function request(path, body, mode = state.mode) {
   if (demoRequest) return demoRequest(path, body);
   const headers = { 'X-BIAI-Mode': mode };
-  const response = await fetch(`/api/${path}`, body === undefined ? { headers } : {
+  const response = await fetch(`${appPath}api/${path}`, body === undefined ? { headers } : {
     method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
   const data = await response.json();
@@ -297,7 +298,7 @@ function renderAttached() {
 function attachmentList(files, removable = false) {
   if (!Array.isArray(files) || !files.length) return '';
   return `<div class="attachment-list">${files.map((file, index) => {
-    const url = `/api/files/${encodeURIComponent(file.id)}`;
+    const url = `${appPath}api/files/${encodeURIComponent(file.id)}`;
     const image = /\.(jpg|jpeg|png|webp)$/i.test(file.name);
     const symbol = image ? 'image' : /\.(mp4|mov)$/i.test(file.name) ? 'video' : /\.(mp3|wav)$/i.test(file.name) ? 'audio' : 'link';
     return `<span class="attachment-chip"><a href="${url}" download><span class="attachment-thumb" aria-hidden="true">${icon(symbol, 18)}${image ? `<img src="${url}/preview" alt="" loading="lazy" decoding="async">` : ''}</span><span>${esc(file.name)}</span></a>${removable ? `<button class="icon-button" type="button" data-action="remove-file" data-index="${index}" aria-label="移除 ${esc(file.name)}">${icon('close', 13)}</button>` : ''}</span>`;
@@ -323,7 +324,7 @@ async function uploadAttachments(input) {
       reportUpload(`正在上传 ${file.name}…`);
       try {
         if (!file.size || file.size > 100 * 1024 * 1024) throw new Error('请选择非空且不超过 100 MB 的文件。');
-        const response = await fetch('/api/files', {
+        const response = await fetch(`${appPath}api/files`, {
           method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) }, body: file
         });
         const result = await response.json();
@@ -1037,7 +1038,7 @@ modeSelect.addEventListener('change', async () => {
     return;
   }
   state.mode = nextMode;
-  sessionStorage.setItem('biai-mode', state.mode);
+  sessionStorage.setItem(`${conversationKey}-mode`, state.mode);
   Object.assign(state, { chat: [], drafts: new Map(), history: [], conversation: null, generations: [], publications: [], accounts: [], attachments: [], accountId: '', taskId: '', taskTab: 'all' });
   await loadMode();
   state.historyBusy = false;

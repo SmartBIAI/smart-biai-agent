@@ -1,0 +1,15 @@
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!server.mjs
+!integrations.mjs
+!live-jobs.mjs
+!mock.mjs
+!media-storage.mjs
+!web-access.mjs
+!LICENSE
+!web/
+!web/index.html
+!web/app.js
+!web/styles.css
