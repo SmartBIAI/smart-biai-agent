@@ -11,7 +11,7 @@ async function until(check, label) {
   throw new Error(`Timed out: ${label}`);
 }
 
-async function app({ agentReply, initialAccounts, initialPublications } = {}) {
+async function app({ agentReply, initialAccounts, initialPublications, initialGenerations, initialImages } = {}) {
   const { window } = new JSDOM('', { url: 'https://example.com/agent/', runScripts: 'outside-only', pretendToBeVisual: true });
   window.HTMLDialogElement.prototype.showModal ||= function () { this.open = true; };
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
@@ -29,6 +29,8 @@ async function app({ agentReply, initialAccounts, initialPublications } = {}) {
       let data = path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
       if (path === 'bootstrap' && initialAccounts) data = { ...data, accounts: initialAccounts };
       if (path === 'publications' && !body && initialPublications) data = structuredClone(initialPublications);
+      if (path === 'generations' && !body && initialGenerations) data = structuredClone(initialGenerations);
+      if (path === 'images' && !body && initialImages) data = structuredClone(initialImages);
       return { ok: true, status: 200, json: async () => data };
     }
     catch (error) { return { ok: false, status: error.status || 500, json: async () => ({ error: error.message }) }; }
@@ -250,5 +252,84 @@ test('country, platform and search filters combine across the whole loaded accou
     ui.change(document.querySelector('#account-filter'),''); ui.change(country,'__unknown__');
     assert.equal(left.querySelectorAll('tbody tr').length,5); assert.ok(left.textContent.includes('品牌64'));
     assert.ok(document.querySelector('#account-works').textContent.includes('尚无发布作品'));
+  } finally { await ui.close(); }
+});
+
+function taskFixtures() {
+  const publications = Array.from({length:83}, (_,index) => ({id:`task-${index}`,accountId:String(1000+index%2),title:`发布标题${index}`,status:['completed','scheduled','queued'][index%3],created:1000000+index,updated:2000000+index,zone:'UTC'}));
+  const generations = Array.from({length:57}, (_,index) => ({id:`video-${index}`,mode:'mock',status:'completed',created:1000000+index,expiresAt:Date.now()+86400000,
+    url:'https://example.com/video.mp4',parameters:{model:'smartbiai-sd-2-0-mini-260619',prompt:`视频创作${index}`,duration:6}}));
+  const images = Array.from({length:43}, (_,index) => ({id:`image-${index}`,mode:'mock',status:'completed',created:1000000+index,
+    parameters:{model:'smartbiai-gpt-img-2',prompt:`图片创作${index}`,n:1},results:[{index:0,status:'succeeded',url:'https://example.com/image.png'}]}));
+  return {publications,generations,images};
+}
+
+async function taskPage() {
+  const fixtures=taskFixtures();
+  const ui=await app({initialAccounts:manyAccounts,initialPublications:fixtures.publications,initialGenerations:fixtures.generations,initialImages:fixtures.images});
+  ui.window.location.hash='#tasks';
+  await until(()=>ui.document.querySelector('#task-table.record-scroll'),'task page');
+  return {...ui,fixtures};
+}
+
+test('publication, video and image tabs each append 20 records until the final partial batch', async () => {
+  const ui=await taskPage(); const {document}=ui;
+  try {
+    for(const [tab,total] of [['all',83],['scheduled',28],['publishing',27],['completed',28],['generation',57],['image',43]]) {
+      document.querySelector(`[data-action="task-tab"][data-tab="${tab}"]`).click();
+      const container=document.querySelector('#task-table');
+      assert.equal(container.querySelectorAll('tbody tr').length,20,tab);
+      for(let count=40;count<total+20;count+=20){
+        scrollBottom(ui,container);
+        assert.equal(container.querySelectorAll('tbody tr').length,Math.min(count,total),tab);
+        assert.equal(container.scrollTop,1700,tab);
+      }
+      assert.equal(container.querySelector('[data-action="load-task-list"]'),null,tab);
+      assert.ok(container.textContent.includes(`已显示全部 ${total} 条`),tab);
+      assert.equal(document.querySelector('.task-panel > .toolbar').hidden,['generation','image'].includes(tab));
+    }
+  } finally { await ui.close(); }
+});
+
+test('task filtering resets batches and live updates preserve list and detail scroll positions', async () => {
+  const ui=await taskPage();const {document}=ui;
+  try {
+    const container=document.querySelector('#task-table');
+    scrollBottom(ui,container); assert.equal(container.querySelectorAll('tbody tr').length,40);
+    document.querySelector('[data-action="task"][data-id="task-21"]').click();
+    assert.equal(document.querySelector('#task-detail').hidden,false);
+    document.querySelector('#task-detail').scrollTop=75;
+    ui.fixtures.publications[21].title='更新后的发布标题';
+    await until(()=>container.textContent.includes('更新后的发布标题'),'background task update');
+    assert.equal(container.querySelectorAll('tbody tr').length,40);
+    assert.equal(container.scrollTop,1700);assert.equal(document.querySelector('#task-detail').scrollTop,75);
+    document.querySelector('[data-action="close-task"]').click();
+    assert.equal(container.scrollTop,1700);assert.equal(document.querySelector('#task-detail').hidden,true);
+    document.querySelector('[data-action="task"][data-id="task-21"]').click();
+    assert.equal(document.querySelector('#task-detail').scrollTop,0);
+    document.querySelector('[data-action="close-task"]').click();
+    ui.change(document.querySelector('#task-account'),'1001');
+    assert.equal(container.querySelectorAll('tbody tr').length,20);assert.equal(container.scrollTop,0);
+    container.querySelector('[data-action="load-task-list"]').click();assert.equal(container.querySelectorAll('tbody tr').length,40);
+    const search=document.querySelector('#task-search');search.value='发布标题81';search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(container.querySelectorAll('tbody tr').length,1);assert.ok(container.textContent.includes('发布标题81'));
+    search.value='not found';search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(container.querySelectorAll('tbody tr').length,0);assert.ok(container.textContent.includes('没有符合条件的发布任务'));
+  } finally { await ui.close(); }
+});
+
+test('video and image actions remain available after loading later batches', async () => {
+  const ui=await taskPage();const {document}=ui;
+  try {
+    document.querySelector('[data-tab="generation"]').click();scrollBottom(ui,document.querySelector('#task-table'));
+    document.querySelector('[data-action="preview-video"][data-id="video-35"]').click();
+    assert.equal(document.querySelector('#video-dialog').open,true);
+    assert.ok(document.querySelector('#video-dialog video').src.includes('example.com/video.mp4'));
+    document.querySelector('#video-dialog').close();
+    document.querySelector('[data-tab="image"]').click();scrollBottom(ui,document.querySelector('#task-table'));
+    document.querySelector('[data-action="open-image-result"][data-id="image-35"]').click();
+    await until(()=>document.querySelector('[data-image-result="image-35"]'),'image result from a later page');
+    document.querySelector('[data-action="preview-image"][data-id="image-35"]').click();
+    assert.equal(document.querySelector('#image-dialog').open,true);
   } finally { await ui.close(); }
 });
