@@ -15,6 +15,7 @@ import { videoParameters, validateVideoReferences, mockVideoCredits } from './ge
 import { createImageJobs } from './image-jobs.mjs';
 import { createLiveJobs, migrateLive } from './live-jobs.mjs';
 import { webAccess } from './web-access.mjs';
+import { createWebSessions } from './web-sessions.mjs';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
 const access = webAccess(process.env);
@@ -23,6 +24,7 @@ const directory = resolve(process.env.BIAI_DATA_DIR || fileURLToPath(new URL('./
 const filesDirectory = resolve(directory, 'uploads');
 mkdirSync(directory, { recursive: true });
 const database = new DatabaseSync(resolve(directory, 'workbench.sqlite'));
+const sessions = createWebSessions(database, access);
 database.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
@@ -795,6 +797,11 @@ const assets = new Map([
   ['/generation-models.js', ['../generation-models.js', 'text/javascript']]
 ]);
 const demoAssets = new Set(['/demo-assets/sample-video.mp4', '/demo-assets/sample-cover.jpg']);
+const loginAssets = new Map([
+  ['/login', ['login.html', 'text/html']],
+  ['/login.js', ['login.js', 'text/javascript']],
+  ['/login.css', ['login.css', 'text/css']]
+]);
 const { port, host } = access;
 
 const server = createServer(async (request, response) => {
@@ -823,9 +830,44 @@ const server = createServer(async (request, response) => {
       await sendSharedMedia(request, response, url, shared);
       return;
     }
-    if (!access.authorized(request.headers.authorization)) {
-      response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="BIAI Agent", charset="UTF-8"', 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
-      response.end('请使用工作台访问账号和密码登录。');
+    response.setHeader('Cache-Control', 'no-store');
+    const authorized = sessions.authorized(request);
+    if (['GET', 'HEAD'].includes(request.method) && loginAssets.has(path)) {
+      if (path === '/login' && authorized) {
+        response.writeHead(303, { Location: sessions.safeReturn(url.searchParams.get('next')) });
+        response.end();
+        return;
+      }
+      const [file, type] = loginAssets.get(path);
+      response.setHeader('Content-Type', `${type}; charset=utf-8`);
+      response.end(request.method === 'HEAD' ? undefined : readFileSync(new URL(`./web/${file}`, import.meta.url), 'utf8').replaceAll('__BIAI_VERSION__', appVersion));
+      return;
+    }
+    if (request.method === 'POST' && ['/auth/login', '/auth/logout'].includes(path)) {
+      if (!request.headers.origin || !access.validOrigin(request.headers.origin)) fail(403, '请求来源无效。');
+      response.setHeader('Content-Type', 'application/json; charset=utf-8');
+      if (path === '/auth/logout') {
+        response.setHeader('Set-Cookie', sessions.logout(request));
+        response.end(JSON.stringify({ redirect: `${access.basePath}/login` }));
+        return;
+      }
+      const body = await readBody(request, 4096);
+      if (!access.requireAuth) { response.end(JSON.stringify({ redirect: `${access.basePath}/` })); return; }
+      const result = sessions.login(request, body.username, body.password, body.remember === true);
+      response.statusCode = result.status;
+      if (result.cookie) response.setHeader('Set-Cookie', result.cookie);
+      if (result.retryAfter) response.setHeader('Retry-After', result.retryAfter);
+      response.end(JSON.stringify(result.error ? { error: result.error } : { redirect: sessions.safeReturn(body.next) }));
+      return;
+    }
+    if (!authorized) {
+      if (path === '/' && ['GET', 'HEAD'].includes(request.method)) {
+        response.writeHead(303, { Location: `${access.basePath}/login?next=${encodeURIComponent(`${access.basePath}/${url.search}`)}` });
+        response.end();
+      } else {
+        response.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: '登录已过期，请重新登录工作台。' }));
+      }
       return;
     }
     if (request.method === 'POST' && !access.validOrigin(request.headers.origin)) fail(403, '请求来源无效。');
@@ -854,7 +896,9 @@ const server = createServer(async (request, response) => {
       return;
     }
     advanceJobs();
-    response.end(JSON.stringify(await api(request, path)));
+    const result = await api(request, path);
+    if (path === '/api/bootstrap') result.access = { required: access.requireAuth, username: access.requireAuth ? access.username : '' };
+    response.end(JSON.stringify(result));
   } catch (error) {
     if (response.headersSent || response.destroyed) { response.destroy(); return; }
     response.statusCode = error.status || 500;

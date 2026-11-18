@@ -38,7 +38,11 @@ export function webAccess(env) {
     origins.add(publicOrigin);
   }
   return {
-    basePath, host, port, publicOrigin,
+    basePath, host, port, publicOrigin, requireAuth, username,
+    credentialVersion: expected.toString('hex'),
+    verifyCredentials(user, pass) {
+      return typeof user === 'string' && typeof pass === 'string' && timingSafeEqual(digest(`${user}:${pass}`), expected);
+    },
     validHost(value) { return hosts.has(value); },
     validOrigin(value) { return !value || origins.has(value); },
     authorized(header) {

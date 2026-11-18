@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#5142df">
+  <meta name="biai-version" content="__BIAI_VERSION__">
+  <title>登录 · Smart BIAI Agent</title>
+  <link rel="stylesheet" href="./login.css">
+  <script type="module" src="./login.js"></script>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-panel" aria-labelledby="login-title">
+      <a class="brand" href="https://www.biaibiai.com/" target="_blank" rel="noreferrer"><span class="brand-mark" aria-hidden="true">B</span><span>Smart BIAI <span class="brand-agent">Agent</span></span></a>
+      <div class="login-content">
+        <p class="eyebrow"><span></span>你的 AI 创作与社媒工作台</p>
+        <h1 id="login-title">欢迎回来<span class="title-dot">.</span></h1>
+        <p class="intro">登录工作台，让创意走向世界。</p>
+        <form id="login-form">
+          <div class="field"><label for="username">工作台账号</label><div class="input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-3a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v3"/></svg><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="请输入账号" maxlength="64" required autofocus></div></div>
+          <div class="field"><label for="password">登录密码</label><div class="input-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/></svg><input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" maxlength="2048" required><button class="password-toggle" type="button" id="password-toggle" aria-label="显示密码" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div></div>
+          <div class="form-options"><label class="remember"><input type="checkbox" id="remember" name="remember">保持登录 7 天</label><button type="button" class="help-toggle" id="help-toggle" aria-expanded="false" aria-controls="login-help">忘记密码？</button></div>
+          <p id="login-help" class="help-note" hidden>请联系工作台管理员重置访问密码。本工作台使用独立的访问账号。</p>
+          <p id="login-error" class="error" role="alert" hidden></p>
+          <button type="submit" class="submit" id="login-submit"><span>进入工作台</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+          <noscript><p class="error">请启用浏览器 JavaScript 后登录。</p></noscript>
+        </form>
+        <p class="workspace-note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></svg>独立部署 · 数据保存在你的工作空间</p>
+      </div>
+      <footer><span>Smart BIAI Agent · v__BIAI_VERSION__</span><a href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noreferrer">开源项目 ↗</a></footer>
+    </section>
+    <aside class="story-panel" aria-label="工作台功能介绍">
+      <div class="story-grid" aria-hidden="true"></div>
+      <div class="story-content">
+        <p class="story-tag"><span></span>POWERED BY SMART BIAI OPENAPI</p>
+        <h2>从一句灵感，<br>到下一条好作品。</h2>
+        <p class="story-intro">AI 生图、视频创作与海外社媒发布，<br>在同一个对话中完成。</p>
+        <div class="workflow" aria-hidden="true">
+          <div class="prompt-bubble"><span class="spark">✦</span><span>为我的产品，创作新的可能</span><span class="bubble-send">↗</span></div>
+          <div class="workflow-line"></div>
+          <div class="workflow-card"><div class="card-icon image-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="9" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg></div><div><small>01 / CREATE</small><h3>把想法变成画面</h3><p>参考图创作 · 多模型选择</p></div><span class="card-status">AI 生图</span></div>
+          <div class="workflow-line short"></div>
+          <div class="workflow-card video-card"><div class="card-icon video-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="3"/><path d="m16 10 5-3v10l-5-3"/></svg></div><div><small>02 / BRING TO LIFE</small><h3>让故事动起来</h3><p>视频生成 · 在线预览</p></div><span class="card-status">AI 视频</span></div>
+          <div class="workflow-line short"></div>
+          <div class="publish-chip"><span class="check">✓</span><span>确认作品，发布到世界</span><span class="platforms">♪ &nbsp; ▶ &nbsp; ◎</span></div>
+        </div>
+        <div class="story-bottom"><span>创作由 AI 协助，每次生成与发布由你确认。</span><a href="https://developer.biaibiai.com/docs" target="_blank" rel="noreferrer">了解 OpenAPI ↗</a></div>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

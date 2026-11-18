@@ -8,6 +8,7 @@
 !mock.mjs
 !media-storage.mjs
 !web-access.mjs
+!web-sessions.mjs
 !image-jobs.mjs
 !generation-models.js
 !agent.mjs
@@ -17,6 +18,9 @@
 !web/index.html
 !web/app.js
 !web/styles.css
+!web/login.html
+!web/login.js
+!web/login.css
 !web/demo-assets/
 !web/demo-assets/sample-video.mp4
 !web/demo-assets/sample-cover.jpg

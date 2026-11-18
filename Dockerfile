@@ -6,7 +6,9 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean -
 COPY server.mjs integrations.mjs live-jobs.mjs mock.mjs media-storage.mjs web-access.mjs ./
 COPY image-jobs.mjs generation-models.js ./
 COPY agent.mjs agent-mock.mjs ./
+COPY web-sessions.mjs ./
 COPY web/index.html web/app.js web/styles.css ./web/
+COPY web/login.html web/login.js web/login.css ./web/
 COPY web/demo-assets/sample-video.mp4 web/demo-assets/sample-cover.jpg ./web/demo-assets/
 COPY LICENSE ./
 RUN mkdir -p /data && chown node:node /data

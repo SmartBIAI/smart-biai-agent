@@ -46,6 +46,9 @@ small { color: var(--muted); }
 #breadcrumb { font-size: 13px; font-weight: 650; color: #4f5369; }
 .mode-select select { color: #5547b4; background: #f1efff; border-color: #e4ddff; font-size: 12px; font-weight: 650; }
 .mode-select select[data-live=true] { background: #fff1db; color: #88540d; border-color: #f5dcae; }
+.topbar-actions { display: flex; gap: 14px; align-items: center; }
+.logout-button { border: 0; background: transparent; color: #7a758e; padding: 7px 0 7px 14px; border-left: 1px solid var(--line); font-size: 12px; }
+.logout-button:hover { color: var(--accent); }
 .agent-issue, .page-issue { padding: 10px 13px; border: 1px solid #eadcbf; border-radius: 8px; color: #7c4f13; background: #fff7e8; font-size: 13px; }
 .agent-issue { margin: 12px 32px 0; }
 .page-issue { margin-bottom: 12px; }

@@ -16,7 +16,7 @@
 ```sh
 git clone https://github.com/SmartBIAI/smart-biai-agent.git
 cd smart-biai-agent
-docker build -t smart-biai-agent:0.3.0-docker.1 .
+docker build -t smart-biai-agent:0.3.1-docker.1 .
 cd deploy
 cp .env.example .env
 chmod 600 .env
@@ -84,7 +84,7 @@ location ^~ /smart-biai-agent/ {
 
 执行 `nginx -t`，通过后重载 Nginx。宝塔默认安装可使用 `/www/server/nginx/sbin/nginx -t`，再在面板重载。若 Nginx 运行在容器中，需要让它能够访问应用容器，并按实际容器网络设置 `proxy_pass`。
 
-打开 `https://agent.example.com/smart-biai-agent/`，在浏览器弹出的登录窗口中输入工作台账号和密码。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。跳转采用 301，以兼容旧版 Nginx；版本差异见 [Nginx return 指令说明](https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#return)。
+打开 `https://agent.example.com/smart-biai-agent/`，在登录页输入 `.env` 中设置的工作台账号和密码，可选择保持登录 7 天。登录后可在右上角退出。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。跳转采用 301，以兼容旧版 Nginx；版本差异见 [Nginx return 指令说明](https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#return)。
 
 ### 自定义访问路径
 
@@ -137,7 +137,7 @@ fi
 ```sh
 cd ..
 git pull --ff-only
-docker build -t smart-biai-agent:0.3.0-docker.1 .
+docker build -t smart-biai-agent:0.3.1-docker.1 .
 cd deploy
 docker compose -f compose.yml up -d --force-recreate
 curl -fsS http://127.0.0.1:4178/healthz
@@ -156,4 +156,4 @@ curl -fsS http://127.0.0.1:4178/healthz
 | 请求返回 403 | 检查公网域名、`BIAI_PUBLIC_ORIGIN` 和转发的 `Host` 是否一致。 |
 | 页面资源返回 404 | 检查 URL 路径前缀、末尾斜杠和 Nginx 代理规则。 |
 | 数据目录无写入权限 | 确认容器 UID 1000 可以读写数据目录。 |
-| 登录窗口反复弹出 | 核对访问密码及代理是否正确传递 `Authorization`。 |
+| 登录后又回到登录页 | 核对账号密码，通过已配置的 HTTPS 正式域名访问，确认浏览器允许本站 Cookie，代理保留 Cookie 与子路径。 |

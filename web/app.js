@@ -155,9 +155,15 @@ async function request(path, body, mode = state.mode) {
   const response = await fetch(`${appPath}api/${path}`, body === undefined ? { headers } : {
     method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
+  if (response.status === 401) return loginRequired();
   const data = await response.json();
   if (!response.ok) throw Object.assign(new Error(data.error ?? '暂时无法完成操作。'), { status: response.status });
   return data;
+}
+
+function loginRequired() {
+  location.replace(`${appPath}login?next=${encodeURIComponent(`${appPath}${location.search}${location.hash}`)}`);
+  throw Object.assign(new Error('登录已过期，请重新登录。'), { status: 401 });
 }
 
 let toastTimer;
@@ -341,6 +347,7 @@ async function uploadAttachments(input) {
         const response = await fetch(`${appPath}api/files`, {
           method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) }, body: file
         });
+        if (response.status === 401) return loginRequired();
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || '上传未完成，请重试。');
         state.attachments.push(result);
@@ -1367,6 +1374,8 @@ async function loadMode() {
   try {
     const [boot, conversations] = await Promise.all([request('bootstrap'), request('conversations'), sync()]);
     Object.assign(state, boot);
+    const logout = document.querySelector('#logout');
+    if (logout) { logout.hidden = !boot.access?.required; logout.title = boot.access?.username ? `当前账号：${boot.access.username}` : ''; }
     state.history = conversations;
     const remembered = sessionStorage.getItem(`${conversationKey}-conversation-${state.mode}`);
     const active = remembered === null ? conversations[0] : conversations.find(item => item.id === remembered);
@@ -1402,6 +1411,18 @@ modeSelect.addEventListener('change', async () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && conversationDirty) void flushConversation();
 });
+
+document.querySelector('#logout')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await flushConversation();
+    const response = await fetch(`${appPath}auth/logout`, { method: 'POST' });
+    if (!response.ok) throw new Error('暂时无法退出，请稍后重试。');
+    location.replace(`${appPath}login`);
+  } catch (error) { notify(error.message); button.disabled = false; }
+});
+window.addEventListener('pageshow', event => { if (event.persisted) void request('bootstrap').catch(() => {}); });
 
 await loadMode();
 const poll = async () => {
