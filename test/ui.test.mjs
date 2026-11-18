@@ -11,7 +11,7 @@ async function until(check, label) {
   throw new Error(`Timed out: ${label}`);
 }
 
-async function app({ agentReply, initialAccounts, initialPublications, initialGenerations, initialImages } = {}) {
+async function app({ agentReply, initialAccounts, initialPublications, initialGenerations, initialImages, initialConversations, agentPlanner, agentEnabled } = {}) {
   const { window } = new JSDOM('', { url: 'https://example.com/agent/', runScripts: 'outside-only', pretendToBeVisual: true });
   window.HTMLDialogElement.prototype.showModal ||= function () { this.open = true; };
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
@@ -20,7 +20,8 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
   let clock = Date.now();
   const requests = [];
   const storage = new Map();
-  const request = createMockRequest({ storage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) }, key: 'ui', now: () => clock });
+  if(agentEnabled)storage.set('ui',JSON.stringify({generations:initialGenerations||[],images:initialImages||[],publications:initialPublications||[],conversations:initialConversations||[]}));
+  const request = createMockRequest({ storage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) }, key: 'ui', now: () => clock, planner:agentPlanner });
   window.fetch = async (url, options = {}) => {
     const path = String(url).split('/api/')[1];
     const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
@@ -28,6 +29,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
     try {
       let data = path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
       if (path === 'bootstrap' && initialAccounts) data = { ...data, accounts: initialAccounts };
+      if (path === 'bootstrap' && agentEnabled) data = { ...data, agent:{enabled:true} };
       if (path === 'publications' && !body && initialPublications) data = structuredClone(initialPublications);
       if (path === 'generations' && !body && initialGenerations) data = structuredClone(initialGenerations);
       if (path === 'images' && !body && initialImages) data = structuredClone(initialImages);
@@ -332,4 +334,68 @@ test('video and image actions remain available after loading later batches', asy
     document.querySelector('[data-action="preview-image"][data-id="image-35"]').click();
     assert.equal(document.querySelector('#image-dialog').open,true);
   } finally { await ui.close(); }
+});
+
+test('Agent protocol restores a failed task, switches model and retains references without submitting generation',async()=>{
+  const file={id:'ff5a283c-aec3-4c8e-828f-4146cde85334',name:'original.jpg',size:128,type:'image'};
+  const sourceId='308c1704-7a84-4d36-8355-8007b16f4811',conversationId='4c9d4950-50a3-44a8-bcca-d867dd3d0ac2';
+  const image={id:sourceId,mode:'mock',status:'failed',created:Date.now(),credits:5,parameters:{model:'smartbiai-gpt-img-2-6-sunburst',prompt:'保留原始参考图中的产品外观和场景构图。',n:1,size:'1024x1024',quality:'auto',fileIds:[file.id],references:[],maskFileId:null},results:[],error:'测试失败记录'};
+  const initialConversation={id:conversationId,title:'原始创作',revision:1,updated:Date.now(),chat:[{type:'user',text:'原始需求',files:[file]},{type:'image-result',id:sourceId}],drafts:[]};
+  const plans=[];
+  const planner=async state=>{
+    plans.push(structuredClone(state));
+    return state.observations.length?{calls:[{tool:'respond',arguments:{text:'沿用原素材，已准备另一模型的草稿，请确认。'}}]}:
+      {calls:[{tool:'prepare_generation',arguments:{kind:'image',source:{kind:'image',id:sourceId},changes:{model:'smartbiai-gpt-img-2'}}}]};
+  };
+  const ui=await app({agentEnabled:true,agentPlanner:planner,initialImages:[image],initialConversations:[initialConversation]});
+  try{
+    const composer=ui.document.querySelector('#composer');composer.elements.message.value='保留前面的设置，用另一款已开通模型再试一下。';ui.submit(composer);
+    await until(()=>ui.document.querySelector('[data-form="image-generation"]'),'Agent retry draft');
+    const form=ui.document.querySelector('[data-form="image-generation"]');
+    assert.equal(form.elements.model.value,'smartbiai-gpt-img-2');assert.equal(form.elements.prompt.value,image.parameters.prompt);
+    assert.ok(form.textContent.includes(file.name));assert.equal(form.querySelector('button[type=submit]').textContent,'确认生成图片');
+    assert.equal(ui.requests.some(request=>request.path==='images'&&request.body),false);
+    const request=ui.requests.find(request=>request.path==='agent').body;
+    assert.equal(request.protocol,'agent.v1');assert.equal(request.conversationId,conversationId);assert.ok(request.revision>1);
+    assert.equal(Object.hasOwn(request,'history'),false);assert.equal(plans[0].context.resources.find(item=>item.id===sourceId).status,'failed');
+    assert.ok(ui.document.querySelector(`[data-image-result="${sourceId}"]`));
+    ui.submit(form);await until(()=>ui.requests.some(request=>request.path==='images'&&request.body),'confirmed retry submission');
+    const submitted=ui.requests.find(request=>request.path==='images'&&request.body).body;
+    assert.notEqual(submitted.id,sourceId);assert.deepEqual(submitted.fileIds,[file.id]);
+  }finally{await ui.close();}
+});
+
+test('the result adjustment button uses a structured tool action and keeps explicit confirmation',async()=>{
+  const initialConversation={id:'4c9d4950-50a3-44a8-bcca-d867dd3d0ac2',title:'创作记录',revision:1,updated:Date.now(),chat:[{type:'user',text:'原始创作'},{type:'image-result',id:'308c1704-7a84-4d36-8355-8007b16f4811'}],drafts:[]};
+  const image={id:'308c1704-7a84-4d36-8355-8007b16f4811',mode:'mock',status:'failed',created:Date.now(),parameters:{model:'smartbiai-gpt-img-2',prompt:'原始参考场景',n:1,size:'1024x1024',quality:'auto',fileIds:[],references:[],maskFileId:null},results:[]};
+  const ui=await app({agentEnabled:true,initialImages:[image],initialConversations:[initialConversation]});
+  try{
+    ui.document.querySelector('[data-action="agent-adjust"]').click();
+    await until(()=>ui.document.querySelector('[data-form="image-generation"]'),'adjustment draft');
+    assert.equal(ui.requests.find(request=>request.path==='agent').body.command.tool,'prepare_generation');
+    assert.equal(ui.document.querySelector('[data-form="image-generation"]').elements.prompt.value,image.parameters.prompt);
+    assert.equal(ui.requests.some(request=>request.path==='images'&&request.body),false);
+  }finally{await ui.close();}
+});
+
+test('draft controls cannot be edited or confirmed while a multi-turn operation is pending',async()=>{
+  const id='308c1704-7a84-4d36-8355-8007b16f4811';let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const conversation={id:'4c9d4950-50a3-44a8-bcca-d867dd3d0ac2',title:'待确认创作',revision:1,updated:Date.now(),chat:[{type:'user',text:'初始创作'},{type:'image-generation',id}],drafts:[{id,kind:'image',parameters:{model:'smartbiai-gpt-img-2',prompt:'初始产品图',n:1,size:'1024x1024',quality:'auto'},links:[],files:[],credits:5}]};
+  const planner=async state=>{
+    if(state.observations.length)return {calls:[{tool:'respond',arguments:{text:'草稿已更新，请确认。'}}]};
+    await gate;return {calls:[{tool:'prepare_generation',arguments:{kind:'image',source:{kind:'draft',id},changes:{n:2}}}]};
+  };
+  const ui=await app({agentEnabled:true,agentPlanner:planner,initialConversations:[conversation]});
+  try{
+    const form=ui.document.querySelector('[data-form="image-generation"]'),composer=ui.document.querySelector('#composer');
+    composer.elements.message.value='调整当前草稿，其余保留。';ui.submit(composer);
+    await until(()=>ui.document.querySelector('[data-form="image-generation"]').elements.prompt.disabled,'pending controls');
+    const pendingForm=ui.document.querySelector('[data-form="image-generation"]');
+    assert.equal(pendingForm.querySelector('button[type=submit]').disabled,true);ui.submit(pendingForm);
+    assert.equal(ui.requests.some(request=>request.path==='images'&&request.body),false);
+    release();
+    await until(()=>ui.document.querySelector('[data-form="image-generation"]').elements.n.value==='2','updated draft');
+    assert.equal(ui.document.querySelector('[data-form="image-generation"]').elements.prompt.disabled,false);
+  }finally{release();await ui.close();}
 });

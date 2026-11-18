@@ -10,6 +10,8 @@
 !web-access.mjs
 !image-jobs.mjs
 !generation-models.js
+!agent.mjs
+!agent-mock.mjs
 !LICENSE
 !web/
 !web/index.html

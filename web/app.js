@@ -39,7 +39,7 @@ const pubStatuses = {
 
 const state = {
   page: '', accounts: [], models: [], imageModels: [], settings: {}, generations: [], images: [], publications: [],
-  chat: [], drafts: new Map(), intentBusy: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
+  chat: [], drafts: new Map(), intentBusy: false, agentPending: false, formBusy: 0, uploadBusy: false, attachments: [], accountId: '', accountFilter: '', accountSearch: '',
   accountCountry: '', accountRows: 20, workRows: 20, worksAccountId: '',
   taskTab: 'all', taskId: '', taskSearch: '', taskAccount: '', taskRows: 20, loaded: false,
   mode: sessionStorage.getItem(`${conversationKey}-mode`) === 'live' ? 'live' : 'mock', issues: {},
@@ -49,6 +49,17 @@ const modeSelect = document.querySelector('#run-mode');
 let conversationDirty = false;
 let conversationTimer;
 let conversationSave = Promise.resolve(true);
+const agentControls = new Map();
+
+function setAgentPending(pending) {
+  state.agentPending=pending;
+  if(pending){
+    for(const control of main.querySelectorAll('[data-form="generation"] input,[data-form="generation"] select,[data-form="generation"] textarea,[data-form="generation"] button,[data-form="image-generation"] input,[data-form="image-generation"] select,[data-form="image-generation"] textarea,[data-form="image-generation"] button,[data-form="publication"] input,[data-form="publication"] select,[data-form="publication"] textarea,[data-form="publication"] button')){
+      if(!agentControls.has(control))agentControls.set(control,control.disabled);
+      control.disabled=true;
+    }
+  }else{for(const [control,disabled] of agentControls)control.disabled=disabled;agentControls.clear();}
+}
 
 function esc(value = '') {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -236,7 +247,7 @@ function activateConversation(saved) {
 function flushConversation() {
   clearTimeout(conversationTimer);
   conversationSave = conversationSave.then(async () => {
-    if (!conversationDirty || !state.chat.length) return true;
+    if (state.agentPending || !conversationDirty || !state.chat.length) return true;
     conversationDirty = false;
     const active = state.conversation;
     const mode = state.mode;
@@ -318,7 +329,7 @@ function reportUpload(message) {
 async function uploadAttachments(input) {
   const files = Array.from(input.files);
   input.value = '';
-  if (!files.length || state.uploadBusy || state.historyBusy) return;
+  if (!files.length || state.uploadBusy || state.historyBusy || state.intentBusy || state.formBusy) return;
   if (state.attachments.length + files.length > 9) { reportUpload('每条消息最多添加 9 个文件。'); return; }
   state.uploadBusy = true;
   const errors = [];
@@ -363,9 +374,10 @@ function renderChat() {
       if (!task) return assistant('<p>这条发布任务暂不可查看。</p>');
       return assistant(`<div class="confirmed"><span class="confirmed-icon">${icon('check')}</span><div><strong>${task.planned ? '已确认排期' : '已确认发布'}</strong><p>${esc(task.title)} · ${esc(taskAccount(task)?.name)}${task.planned ? ` · ${dateFormat(task.planned, task.zone)} ${zoneLabels[task.zone] ?? esc(task.zone)}` : ''}</p></div><a class="button" href="#tasks/${task.id}">查看任务 ${icon('arrow', 15)}</a></div>`);
     }
-    return assistant(`<p>${esc(entry.text)}</p>${entry.mediaChoice ? entry.mediaChoice.chosen ? `<p class="field-note">已选择生成${entry.mediaChoice.chosen === 'image' ? '图片' : '视频'}</p>` : `<div class="detail-actions"><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="image">${icon('image')} 生成图片</button><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="video">${icon('video')} 生成视频</button></div>` : ''}${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
+    return assistant(`<p>${esc(entry.text)}</p>${entry.mediaChoice ? entry.mediaChoice.chosen ? `<p class="field-note">已选择生成${entry.mediaChoice.chosen === 'image' ? '图片' : '视频'}</p>` : `<div class="detail-actions"><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="image">${icon('image')} 生成图片</button><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="video">${icon('video')} 生成视频</button></div>` : ''}${renderAgentTargets(entry.targets)}${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
   }).join('') + (state.intentBusy ? assistant('<p class="muted">正在处理你的请求…</p>') : '');
   box.scrollTop = box.scrollHeight;
+  if(state.agentPending)setAgentPending(true);
 }
 
 function assistant(content) {
@@ -421,6 +433,7 @@ function renderImageDraft(draft) {
   const pngs = (draft.files || []).filter(file => /\.png$/i.test(file.name));
   return `<form class="inner-card image-generation-form" data-form="image-generation" data-id="${draft.id}">
     <div class="card-header"><span class="card-icon">${icon('image')}</span><div><h3>生成图片</h3><p>${state.mode === 'live' ? '先查看积分报价，再确认生成。' : '模拟生成会展示固定示例图片。'}</p></div></div>
+    ${draft.notes?.length ? `<p class="field-note">${draft.notes.map(note=>esc(note)).join(' ')}</p>` : ''}
     <label>图片提示词<textarea name="prompt" rows="3" maxlength="${model.maxPrompt}" required>${esc(p.prompt)}</textarea></label>
     <div class="fields generation-fields"><label>生图模型<select name="model">${state.imageModels.map(item => `<option value="${esc(item.id)}"${selected(item.id, p.model)}>${esc(item.name)}</option>`).join('')}</select></label>
     ${specs}<label>生成张数<select name="n">${options(Array.from({ length: model.maxCount }, (_, index) => index + 1), p.n)}</select></label></div>
@@ -440,7 +453,7 @@ function imageResultCard(id) {
     <small>第 ${index + 1} 张${task.mode === 'mock' ? ' · 示例图片' : item.width && item.height ? ` · ${item.width} × ${item.height}` : ''}</small>
     ${item.url ? `<button class="text-button" type="button" data-action="preview-image" data-id="${id}" data-index="${index}">查看大图</button>` : ''}</div>`).join('')}</div>` : ['queued', 'submitting', 'generating', 'unknown', 'review'].includes(task.status) ? '<div class="progress"><i></i></div>' : ''}
     ${task.error ? `<p class="form-error">${esc(task.error)}</p>` : ''}
-    ${task.mode === 'live' ? `<div class="card-actions"><span class="muted">${task.chargedCredits ? `已结算 ${esc(task.chargedCredits)} 积分` : ''}${task.refundedCredits ? ` · 已退回 ${esc(task.refundedCredits)} 积分` : ''}</span>${['completed', 'partial', 'expired'].includes(task.status) ? `<button class="button" data-action="refresh-image" data-id="${id}">刷新图片链接</button>` : ''}</div>` : ''}</div>`;
+    ${task.mode === 'live' ? `<div class="card-actions"><span class="muted">${task.chargedCredits ? `已结算 ${esc(task.chargedCredits)} 积分` : ''}${task.refundedCredits ? ` · 已退回 ${esc(task.refundedCredits)} 积分` : ''}</span>${['completed', 'partial', 'expired'].includes(task.status) ? `<button class="button" data-action="refresh-image" data-id="${id}">刷新图片链接</button>` : ''}</div>` : ''}${agentRetryButton('image',id,task.status)}</div>`;
 }
 
 function renderImageDialog(id, index) {
@@ -474,6 +487,7 @@ function renderGenerationDraft(draft) {
   const localOnly = hasFiles && !storage?.ready;
   return `<form class="inner-card generation-form" data-form="generation" data-id="${id}">
     <div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成视频</h3><p>${state.mode === 'live' ? '先查看积分报价，再确认生成。' : '选好视频设置后，可查看模拟报价。'}</p></div></div>
+    ${draft.notes?.length ? `<p class="field-note">${draft.notes.map(note=>esc(note)).join(' ')}</p>` : ''}
     <label>视频提示词<textarea name="prompt" rows="2" required maxlength="${model.maxPrompt || 20000}">${esc(p.prompt)}</textarea></label>
     <div class="fields generation-fields"><label>模型<select name="model">${state.models.map(item => `<option value="${item.id}"${selected(item.id, p.model)}>${item.name}</option>`).join('')}</select></label>
       <label>画幅<select name="ratio">${model.ratios.map(ratio => `<option${selected(ratio, p.ratio)}>${ratio}</option>`).join('')}</select></label>
@@ -495,7 +509,7 @@ function resultCard(id, intent = {}) {
   return `<div class="inner-card result-card" data-result="${id}"><div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成结果</h3><p>${esc(video.parameters.prompt.slice(0, 78))}</p></div>${generationBadge(video)}</div>
     ${video.url ? videoPreview(video) : ['generating', 'queued', 'submitting'].includes(video.status) ? '<div class="progress"><i></i></div>' : ''}
     ${video.error ? `<p class="field-note">${esc(video.error)}</p>` : ''}
-    ${video.status === 'completed' ? `<div class="card-actions"><span class="muted">视频可用至 ${dateFormat(video.expiresAt)}</span>${state.mode === 'live' ? `<button class="button" data-action="refresh-video" data-id="${id}">刷新链接</button>` : ''}<button class="button primary" data-action="draft-publish" data-id="${id}">${intent.publish ? '继续准备发布' : '准备发布'} ${icon('arrow', 15)}</button></div>` : ''}</div>`;
+    ${video.status === 'completed' ? `<div class="card-actions"><span class="muted">视频可用至 ${dateFormat(video.expiresAt)}</span>${state.mode === 'live' ? `<button class="button" data-action="refresh-video" data-id="${id}">刷新链接</button>` : ''}<button class="button primary" data-action="draft-publish" data-id="${id}">${intent.publish ? '继续准备发布' : '准备发布'} ${icon('arrow', 15)}</button></div>` : ''}${agentRetryButton('video',id,video.status)}</div>`;
 }
 
 function renderPublicationDraft(draft) {
@@ -768,10 +782,31 @@ function renderSettings() {
 
 function textEntry(text, details = {}) { state.chat.push({ type: 'text', text, ...details }); }
 
-async function sendMessage(message, { mediaType, referenceFiles, understood, choice } = {}) {
+function semanticAgent() { return state.agent?.enabled && state.agent.semantic !== false; }
+
+function agentRetryButton(kind, id, status) {
+  return ['completed','partial','failed','expired'].includes(status) ? `<div class="detail-actions agent-result-actions"><button class="button quiet" data-action="agent-adjust" data-kind="${kind}" data-id="${esc(id)}">调整参数</button></div>` : '';
+}
+
+function renderAgentTargets(targets) {
+  return Array.isArray(targets) ? `<div class="recent">${targets.map(item=>`<button type="button" class="recent-item" data-action="agent-show" data-kind="${esc(item.kind)}" data-id="${esc(item.id)}"><span>${esc(item.label || item.id)}</span>${icon('arrow',15)}</button>`).join('')}</div>` : '';
+}
+
+async function applyAgentResponse(response) {
+  if(response.protocol!=='agent.v1'||!response.conversation)throw new Error('工作台版本不一致，请刷新页面后重试。');
+  for(const name of ['images','generations','publications','accounts'])for(const item of response.updates?.[name]||[])upsert(state[name],item);
+  for(const name of ['models','imageModels'])if(Array.isArray(response.updates?.[name]))state[name]=response.updates[name];
+  clearTimeout(conversationTimer);conversationDirty=false;
+  activateConversation(response.conversation);
+  const {id,title,revision,updated}=response.conversation;
+  state.history=[{id,title,revision,updated},...state.history.filter(item=>item.id!==id)];
+  renderConversationHistory();
+}
+
+async function sendMessage(message, { mediaType, referenceFiles, understood, choice, command } = {}) {
   const value = message.trim();
-  if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy) return;
-  if (referenceFiles === undefined && !state.attachments.length && /^(?:生成)?(?:图片|图像|视频)$/.test(value)) {
+  if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy || state.formBusy) return;
+  if (!semanticAgent() && !command && referenceFiles === undefined && !state.attachments.length && /^(?:生成)?(?:图片|图像|视频)$/.test(value)) {
     const pending = state.chat.at(-1);
     if (pending?.mediaChoice && !pending.mediaChoice.chosen) {
       state.chat.push({ type: 'user', text: value });
@@ -788,7 +823,25 @@ async function sendMessage(message, { mediaType, referenceFiles, understood, cho
   renderAttached();
   renderChat();
   if (!value) return;
+  let agentApplied=false;
   try {
+    if ((semanticAgent() || command) && !understood) {
+      if(!await flushConversation())throw new Error('本条消息尚未保存，请稍后重试。');
+      const conversationId=state.conversation.id;
+      setAgentPending(true);
+      try {
+        const response=await request('agent',{protocol:'agent.v1',turnId:crypto.randomUUID(),conversationId,revision:state.conversation.revision,message:value,fileIds:files.map(file=>file.id),...(command?{command}:{})});
+        await applyAgentResponse(response);
+        agentApplied=true;
+      } catch(error) {
+        if(error.status===409){
+          await applyAgentResponse({protocol:'agent.v1',conversation:await request(`conversations/${conversationId}`)});
+          textEntry(`${error.message} 请基于最新记录重新发送要求。`);
+        }
+        throw error;
+      }
+      return;
+    }
     const intent = normalizeGenerationIntent(value, understood ?? await request('agent', { message: value, history, fileIds: files.map(file => file.id) }), { mediaType });
     if (state.chat !== chat) return;
     if (intent.needsMediaChoice) {
@@ -844,8 +897,9 @@ async function sendMessage(message, { mediaType, referenceFiles, understood, cho
   } catch (error) {
     if (state.chat === chat) textEntry(error.message);
   } finally {
+    setAgentPending(false);
     state.intentBusy = false;
-    saveChat();
+    if(!agentApplied)saveChat();
     renderChat();
   }
 }
@@ -884,7 +938,7 @@ function generationFormData(form) {
   const draft = state.drafts.get(form.dataset.id);
   return { prompt: values.get('prompt'), model: values.get('model'), ratio: values.get('ratio'),
     resolution: values.get('resolution'), duration: Number(values.get('duration')), audio: values.has('audio'),
-    ...(state.mode === 'live' ? { references: draft.links, fileIds: (draft.files ?? []).map(file => file.id) } : {}) };
+    references: draft.links || [], fileIds: (draft.files ?? []).map(file => file.id) };
 }
 
 function changeDraft(form, target) {
@@ -948,7 +1002,7 @@ function setFormError(form, message = '') {
 }
 
 async function submitForm(form, clearSecret = false) {
-  if (form.dataset.pending || state.historyBusy) return;
+  if (form.dataset.pending || state.historyBusy || state.agentPending) return;
   if (['generation', 'image-generation'].includes(form.dataset.form) && state.mode === 'live' && state.drafts.get(form.dataset.id)?.files?.length && !state.settings.storage?.ready) return;
   form.dataset.pending = 'true';
   state.formBusy += 1;
@@ -1147,6 +1201,8 @@ main.addEventListener('click', async event => {
   if (!control || state.historyBusy) return;
   const { action, id } = control.dataset;
   switch (action) {
+    case 'agent-adjust': void sendMessage('调整这条创作的参数',{command:{tool:'prepare_generation',arguments:{kind:control.dataset.kind,source:{kind:control.dataset.kind,id},changes:{}}}}); break;
+    case 'agent-show': void sendMessage('查看这条记录',{command:{tool:'get_task',arguments:{target:{kind:control.dataset.kind,id},refresh:true,show:true}}}); break;
     case 'load-account-list': loadAccountBatch(control.dataset.list); break;
     case 'load-task-list': loadTaskBatch(); break;
     case 'prompt': void sendMessage(control.dataset.message); break;

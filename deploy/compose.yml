@@ -1,7 +1,7 @@
 name: smart-biai-agent
 services:
   agent:
-    image: smart-biai-agent:0.2.4-docker.1
+    image: smart-biai-agent:0.3.0-docker.1
     restart: unless-stopped
     init: true
     env_file: .env

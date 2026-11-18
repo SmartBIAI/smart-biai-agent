@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { parseEnv } from 'node:util';
 import { accounts, generationResult, interpret, models, imageModels } from './mock.mjs';
-import { socialClient, understand, videoClient, imageClient } from './integrations.mjs';
+import { socialClient, understand, videoClient, imageClient, planAgent } from './integrations.mjs';
+import { runConversationAgent, agentProtocol } from './agent.mjs';
+import { mockAgentPlanner } from './agent-mock.mjs';
 import { videoParameters, validateVideoReferences, mockVideoCredits } from './generation-models.js';
 import { createImageJobs } from './image-jobs.mjs';
 import { createLiveJobs, migrateLive } from './live-jobs.mjs';
@@ -43,6 +45,15 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS uploaded_file (id TEXT PRIMARY KEY, name TEXT NOT NULL, size INTEGER NOT NULL);
 `);
 migrateLive(database);
+database.exec(`CREATE TABLE IF NOT EXISTS agent_turn (
+  id TEXT PRIMARY KEY, mode TEXT NOT NULL, conversation_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_turn_conversation ON agent_turn(mode, conversation_id, created DESC);
+CREATE TABLE IF NOT EXISTS agent_lineage (
+  mode TEXT NOT NULL, id TEXT NOT NULL, conversation_id TEXT NOT NULL, source TEXT, created INTEGER NOT NULL,
+  PRIMARY KEY(mode,id)
+);`);
 if (!database.prepare('PRAGMA table_info(uploaded_file)').all().some(column => column.name === 'folder')) {
   database.exec('ALTER TABLE uploaded_file ADD COLUMN folder TEXT');
 }
@@ -239,8 +250,8 @@ function publicationView(row) {
   };
 }
 
-function generationParameters(body, catalog, live) {
-  return videoParameters(body, catalog, live);
+function generationParameters(body, catalog) {
+  return videoParameters(body, catalog, true);
 }
 
 function mockCredits(body) { return mockVideoCredits(body); }
@@ -476,12 +487,12 @@ const imageJobs = createImageJobs(database, {
 async function bootstrap(mode) {
   const settings = Object.fromEntries(Object.keys(groups).map(name => [name, settingView(name)]));
   settings.storage = storageView();
-  if (mode === 'mock') return { mode, version: appVersion, accounts, models, imageModels, settings, issues: {} };
+  if (mode === 'mock') return { mode, version: appVersion, agent: {enabled:true,semantic:false}, accounts, models, imageModels, settings, issues: {} };
   const [social, video, image] = await Promise.allSettled([Promise.resolve().then(() => socialClient(configuration('social')).accounts()), liveModels(), liveImageModels()]);
   const found = social.status === 'fulfilled' ? social.value.accounts : [];
   const catalog = video.status === 'fulfilled' ? video.value : [];
   return {
-    mode, version: appVersion, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
+    mode, version: appVersion, agent: {enabled:true,semantic:true}, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
     issues: {
       social: social.status === 'rejected' ? social.reason.message : social.value.limited ? '当前已加载前 500 个账号，可在 Agent 按账号 ID 或平台查询。' : '',
       video: video.status === 'rejected' ? video.reason.message : catalog.length ? '' : '已连接生成服务，请在 Smart BIAI 开通视频模型。',
@@ -492,6 +503,8 @@ async function bootstrap(mode) {
 }
 
 async function agent(body, mode) {
+  if (body.protocol === agentProtocol) return conversationAgent(body, mode);
+  if(body.protocol)fail(400,'Agent 协议版本不受支持，请刷新工作台。');
   const message = validateText(body.message, 2000, '消息');
   const fileIds = body.fileIds ?? [];
   if (!Array.isArray(fileIds) || fileIds.length > 9) fail(400, '每条消息最多添加 9 个文件。');
@@ -517,6 +530,107 @@ async function agent(body, mode) {
     } catch (error) { accountError = error.message; }
   }
   return { ...intent, accounts: found, targetId: found.length === 1 && found[0].canPublish ? found[0].id : '', accountError, limited };
+}
+
+const agentTurns = new Map();
+function currentAgentUpdates(updates,mode){
+  const current={...updates};
+  for(const [name,read] of [['images',id=>imageJobs.get(id,mode)],['generations',id=>generationView(getGeneration.get(id),mode)],['publications',id=>{const row=getPublication.get(id);if(row?.mode!==mode)fail(404,'记录不存在');return publicationView(row);}]] )
+    current[name]=(updates?.[name]||[]).flatMap(item=>{try{return [read(item.id)];}catch{return [];}});
+  return current;
+}
+async function conversationAgent(body, mode) {
+  const id=validId(body.turnId), conversationId=validId(body.conversationId), message=validateText(body.message,2000,'消息');
+  const fileIds=body.fileIds ?? [];
+  if(!Array.isArray(fileIds)||fileIds.length>9)fail(400,'请检查本条消息的附件。');
+  fileIds.forEach(validId);
+  if(!Number.isSafeInteger(body.revision)||body.revision<1)fail(400,'请先保存对话。');
+  const fingerprint=createHash('sha256').update(JSON.stringify({mode,conversationId,message,fileIds,command:body.command||null})).digest('hex');
+  const previous=database.prepare('SELECT * FROM agent_turn WHERE id=?').get(id);
+  const readConversation=()=>conversationView(database.prepare('SELECT * FROM conversation WHERE mode=? AND id=?').get(mode,conversationId));
+  if(previous){
+    if(previous.fingerprint!==fingerprint)fail(409,'该轮编号已用于另一项请求。');
+    const data=JSON.parse(previous.data);
+    return {protocol:agentProtocol,conversation:readConversation(),updates:currentAgentUpdates(data.updates,mode),turnId:id};
+  }
+  if(agentTurns.has(id)){
+    const pending=agentTurns.get(id);
+    if(pending.fingerprint!==fingerprint)fail(409,'该轮编号已用于另一项请求。');
+    return pending.promise;
+  }
+  const work=async()=>{
+    const snapshot=readConversation();
+    if(snapshot.revision!==body.revision)fail(409,'对话已有更新，请基于最新记录重新操作。');
+    const last=snapshot.chat.at(-1);
+    if(last?.type!=='user'||last.text?.trim()!==message||fileIds.some(fileId=>!last.files?.some(file=>file.id===fileId)))fail(409,'本条消息尚未保存到当前对话，请重新发送。');
+    const recent=database.prepare('SELECT data FROM agent_turn WHERE mode=? AND conversation_id=? ORDER BY created DESC LIMIT 3').all(mode,conversationId).map(row=>JSON.parse(row.data));
+    const zone=readSetting('preferences').zone||'Asia/Shanghai';
+    const accountQuery=async(filters={})=>{
+      if(mode==='live')return socialClient(configuration('social')).accounts(filters);
+      const aliases={US:'美国',GB:'英国',UK:'英国'};
+      return {accounts:accounts.filter(item=>(!filters.id||item.id===filters.id)&&(!filters.platform||item.platform===filters.platform)&&(!filters.country||item.country===(aliases[String(filters.country).toUpperCase()]||filters.country))&&(!filters.keyword||`${item.name} ${item.alias}`.toLowerCase().includes(filters.keyword.toLowerCase()))),limited:false};
+    };
+    const resource=async(kind,targetId,refresh=false)=>{
+      validId(targetId);
+      let result;
+      if(kind==='image')result=refresh?await imageJobs.refresh(targetId,mode):imageJobs.get(targetId,mode);
+      else if(kind==='video'){
+        let row=getGeneration.get(targetId);
+        generationView(row,mode);
+        if(refresh&&mode==='live'&&row.source_id)row=await liveJobs.refreshVideo(row);
+        result=generationView(row,mode);
+      } else {
+        const row=getPublication.get(targetId);
+        if(!row||row.mode!==mode)fail(404,'未找到当前模式中的发布任务。');
+        if(refresh&&mode==='live'&&row.source_id){
+          // The existing scheduler queries confirmed publishing jobs. This tool never resubmits them.
+          result=publicationView(row);
+        }else result=publicationView(row);
+      }
+      const lineage=database.prepare('SELECT source FROM agent_lineage WHERE mode=? AND id=?').get(mode,targetId);
+      return {...result,...(lineage?.source?{source:JSON.parse(lineage.source)}:{})};
+    };
+    const result=await runConversationAgent({conversation:snapshot,message,fileIds,mode,zone,memory:recent[0]?.memory||'',
+      recentActions:recent.flatMap(turn=>(turn.observations||[]).map(step=>({tool:step.tool,ok:step.ok,error:step.error,target:step.result?.target,status:step.result?.status,credits:step.result?.credits})))}, {
+      plan:body.command||mode==='mock'?mockAgentPlanner(message,body.command):state=>planAgent(configuration('ai'),state),
+      uuid:randomUUID,
+      models:kind=>mode==='mock'?(kind==='image'?imageModels:models):kind==='image'?liveImageModels():liveModels(),
+      task:resource,
+      list:kind=>kind==='image'?imageJobs.list(mode):kind==='video'?database.prepare('SELECT * FROM generation WHERE mode=? ORDER BY created DESC').all(mode).map(row=>generationView(row,mode)):database.prepare('SELECT * FROM publication WHERE mode=? ORDER BY created DESC').all(mode).map(publicationView),
+      file:async fileId=>{const file=await getUpload(fileId);return {id:file.id,name:file.name,size:file.size,type:mediaTypes[extname(file.name).toLowerCase()][0]};},
+      accounts:accountQuery,
+      quote:(kind,parameters)=>kind==='image'?imageJobs.quote(parameters,mode):estimate(parameters,mode),
+      outputUrl:url=>mode==='mock'?new URL(url,'https://demo.invalid/').href:url
+    });
+    database.exec('BEGIN IMMEDIATE');
+    try{
+      for(const changedId of result.changedIds){
+        if(getGeneration.get(changedId)||getPublication.get(changedId)||database.prepare('SELECT id FROM image_generation WHERE id=?').get(changedId))fail(409,'该草稿已在其他页面确认，请先刷新当前对话。');
+        const draft=result.drafts.find(item=>item.id===changedId);
+        if(!draft.generationId&&draft.credits==null){database.prepare('DELETE FROM image_quote WHERE id=?').run(changedId);database.prepare('DELETE FROM video_quote WHERE id=?').run(changedId);}
+        database.prepare('INSERT OR REPLACE INTO agent_lineage VALUES(?,?,?,?,?)').run(mode,changedId,conversationId,draft.source?JSON.stringify(draft.source):null,Date.now());
+      }
+      const committed=new Map();
+      for(const draft of result.drafts){
+        if(getGeneration.get(draft.id)?.mode===mode)committed.set(draft.id,'result');
+        else if(getPublication.get(draft.id)?.mode===mode)committed.set(draft.id,'confirmed');
+        else if(database.prepare('SELECT mode FROM image_generation WHERE id=?').get(draft.id)?.mode===mode)committed.set(draft.id,'image-result');
+      }
+      saveConversation(mode,conversationId,{revision:snapshot.revision,chat:result.chat.map(entry=>committed.has(entry.id)&&['generation','image-generation','publication'].includes(entry.type)?{...entry,type:committed.get(entry.id)}:entry),drafts:result.drafts.filter(draft=>!committed.has(draft.id))});
+      const observations=result.observations.map(step=>({tool:step.tool,ok:step.ok,error:step.error,result:step.result?{
+        target:step.result.target,id:step.result.id,status:step.result.status,credits:step.result.credits,total:step.result.total,
+        model:step.result.parameters?.model,n:step.result.parameters?.n,requiresConfirmation:step.result.requiresConfirmation,
+        adjustments:step.result.adjustments,quoteError:step.result.quoteError
+      }:undefined}));
+      const replayUpdates={...result.updates};
+      for(const group of ['images','generations','publications'])replayUpdates[group]=(result.updates[group]||[]).map(item=>({id:item.id}));
+      database.prepare('INSERT INTO agent_turn VALUES(?,?,?,?,?,?)').run(id,mode,conversationId,fingerprint,JSON.stringify({memory:result.memory,observations,notes:result.notes,updates:replayUpdates}),Date.now());
+      database.exec('COMMIT');
+    }catch(error){database.exec('ROLLBACK');throw error;}
+    return {protocol:agentProtocol,conversation:readConversation(),updates:result.updates,turnId:id};
+  };
+  const promise=work();agentTurns.set(id,{fingerprint,promise});
+  try{return await promise;}finally{agentTurns.delete(id);}
 }
 
 async function estimate(body, mode) {

@@ -1,5 +1,6 @@
 import { accounts, models, imageModels, interpret, generationResult } from '../../mock.mjs';
 import { videoParameters, imageParameters, mockVideoCredits } from '../../generation-models.js';
+import { mockAgentTurn } from './agent-api.mjs';
 
 const generationDelay = 1800;
 const publicationDelay = 3800;
@@ -9,11 +10,11 @@ function fail(status, message) { throw Object.assign(new Error(message), { statu
 
 function estimate(body) {
   return {
-    parameters: videoParameters(body, models), credits: mockVideoCredits(body)
+    parameters: videoParameters(body, models, true), credits: mockVideoCredits(body)
   };
 }
 
-export function createMockRequest({ storage, key, now = Date.now }) {
+export function createMockRequest({ storage, key, now = Date.now, planner }) {
   return async (path, body) => {
     const data = JSON.parse(storage.getItem(key) || '{"generations":[],"publications":[],"conversations":[]}');
     const time = now();
@@ -62,6 +63,10 @@ export function createMockRequest({ storage, key, now = Date.now }) {
     }
 
     if (path === 'bootstrap') return reply({ mode: 'mock', accounts, models, imageModels, settings: { preferences: {} }, issues: {} });
+    if (path === 'agent' && body.protocol === 'agent.v1') {
+      const result=await mockAgentTurn(data,body,{now,planner,current:()=>JSON.parse(storage.getItem(key))});
+      storage.setItem(key,JSON.stringify(result.data));return result.response;
+    }
     if (path === 'agent') return reply(interpret(body.message.trim()));
     if (path === 'quote') return reply(estimate(body));
     if (path === 'images/quote') {

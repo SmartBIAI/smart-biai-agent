@@ -1,4 +1,5 @@
 import { normalizeModel, normalizeGenerationIntent } from './generation-models.js';
+import { agentInstructions, agentTools } from './agent.mjs';
 
 const socialRoot = 'https://border-api.biaibiai.com/open-api';
 const videoRoot = 'https://developer.biaibiai.com';
@@ -179,11 +180,11 @@ export function mediaUrl(value) {
 
 function clean(value, max) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
 
+// Compatibility adapter for pre-Agent clients. agent.v1 uses the structured tool planner below.
 const intentRules = `你是 Smart BIAI 工作台的指令理解组件。只返回一个 JSON 对象，不要 Markdown。当前请求不会自动执行。字段：
 mediaType 必须为 image、video 或 unspecified，表示本次要求产出的成品类型。needsMediaChoice 为布尔值，用户未说明类型或同时要求图片和视频时为 true，不得默认生成视频。
 query,generate,generateImage,imageQuery,publish,taskQuery 为布尔值，可组合。generate 是视频生成，generateImage 是图片、海报、插画、封面、产品使用图等静态创作，二者不可同时为 true；图生视频只设置 generate。一张/两张/一幅通常表示图片，一条/一段视频或让参考图动起来表示视频。imageQuery 是查看已生成的图片或生图记录。查看发布任务用 taskQuery，不要当作发布；查看生成记录也不要开始生成。
 以当前 message 明确要求的成品为准，history 仅用于补充当前省略的信息，不能沿用上一次的视频类型覆盖本次的生图要求。attachments 只包含附件类型信息；参考图片既可用于生图也可用于视频，不能据此决定产出类型。你没有读取图像内容，不得捏造图片中的外观。prompt 保留用户对参考图中产品的引用，由生成模型结合参考素材处理。
-示例：用参考图中的挡水帽，生成一张产品使用图，小孩在浴盆带着图中挡水帽洗头 → mediaType=image,generateImage=true,generate=false；把参考图做成6秒视频 → mediaType=video,generate=true,generateImage=false；用参考图生成一个 → mediaType=unspecified,needsMediaChoice=true。
 platform 只能是 TikTok、YouTube、Instagram 或空字符串。accountId 仅从用户消息中明确的数字 ID 提取，其他情况留空。
 keyword 是用户明确指定的账号名或别名，country 是用户明确指定的国家（优先 ISO 代码），缺省为空。不要补造账号。
 prompt 是图片或视频的具体提示词，可扩写用户创作需求，去掉账号、排期等操作指令；ratio 使用用户指定的画幅或留空；duration 为明确提到的整数秒、自动时长 -1 或 null。n 是用户明确要求的图片张数（1～8，缺省 1）；model 是用户明确指定的模型名或完整模型 ID，缺省留空。不要猜模型授权。
@@ -191,18 +192,17 @@ title 和 description 为用户提供或基于当前对话建议的发布标题�
 requiresSchedule 表示用户要求预约。不要推断具体日期、时区或未明确的时间。message 用于不属于以上操作时简短回复。
 如果操作内容不清楚，礼貌询问。不得索要密钥、改变应用设置或声称操作已执行。`;
 
-export async function understand(config, message, history, fill = false, context = {}) {
+async function aiObject(config, input, maxTokens = 2048) {
   if (!config.key || !config.model || !['deepseek', 'doubao'].includes(config.provider)) {
     throw new IntegrationError('请在连接设置选择 DeepSeek 或豆包，并填写模型 ID 和 API Key。', 422);
   }
-  const instruction = fill ? '为这段视频提示词建议一条简洁标题和可选描述，不添加未经验证的营销承诺，只返回 JSON 对象 {"title":"","description":""}。' : intentRules;
-  const content = JSON.stringify({ instruction, history, message, attachments: context.attachments || [] });
+  const content = JSON.stringify(input);
   const deepseek = config.provider === 'deepseek';
   const result = await jsonRequest(deepseek ? 'DeepSeek' : '豆包', deepseek ? 'https://api.deepseek.com/anthropic/v1/messages' : 'https://ark.cn-beijing.volces.com/api/v3/responses', {
     timeout: 45000,
     headers: deepseek ? { 'x-api-key': config.key, 'anthropic-version': '2023-06-01' } : { Authorization: `Bearer ${config.key}` },
-    body: deepseek ? { model: config.model, messages: [{ role: 'user', content }], max_tokens: 2048, stream: false } :
-      { model: config.model, input: [{ role: 'user', content }], max_output_tokens: 2048, stream: false }
+    body: deepseek ? { model: config.model, messages: [{ role: 'user', content }], max_tokens: maxTokens, stream: false } :
+      { model: config.model, input: [{ role: 'user', content }], max_output_tokens: maxTokens, stream: false }
   });
   const done = deepseek ? ['end_turn', 'stop_sequence'].includes(result?.stop_reason) : result?.status === 'completed';
   const blocks = deepseek ? result?.content : result?.output?.filter(item => item.type === 'message' && item.role === 'assistant')?.flatMap(item => item.content ?? []);
@@ -211,6 +211,16 @@ export async function understand(config, message, history, fill = false, context
   try { if (done && answer && answer.length < 16000) parsed = JSON.parse(answer.replace(/^```(?:json)?\s*|\s*```$/gi, '')); }
   catch { /* Ask the user to retry below. */ }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw unexpected(deepseek ? 'DeepSeek' : '豆包');
+  return parsed;
+}
+
+export function planAgent(config, state) {
+  return aiObject(config, { instruction: agentInstructions, tools: agentTools, ...state }, 4096);
+}
+
+export async function understand(config, message, history, fill = false, context = {}) {
+  const instruction = fill ? '为这段视频提示词建议一条简洁标题和可选描述，不添加未经验证的营销承诺，只返回 JSON 对象 {"title":"","description":""}。' : intentRules;
+  const parsed = await aiObject(config, {instruction,history,message,attachments:context.attachments || []});
   const title = clean(parsed.title, 100);
   const description = clean(parsed.description, 1000);
   if (fill) return { title, description };

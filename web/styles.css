@@ -255,6 +255,7 @@ tr.selected-row td { background: #f1eeff; }
 .timeline li:last-child { border-left-color: transparent; }
 .timeline small { display: block; margin-top: 2px; }
 .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.agent-result-actions { margin-top: 12px; }
 
 .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .settings-card { padding: 17px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
