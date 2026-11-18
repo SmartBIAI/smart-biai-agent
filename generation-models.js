@@ -1,27 +1,47 @@
 const ratios = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'];
 
-export function explicitMediaIntent(message) {
-  const text = String(message || '').split(/[，,。；;\n]/).filter(part => !/^\s*(?:请)?(?:不要|不用|不必|无需|别|不想|不需要)/.test(part)).join('，');
-  if (!text.trim()) return null;
-  if (/^(?:请|帮我|给我|麻烦)*(?:查看|查询|打开|找出).*(?:图片|图像|生图|海报)/.test(text) &&
-      !/[，,。；;](?:请|帮我)?(?:生成|制作|画)/.test(text)) return 'image-query';
+function mediaEvidence(message) {
+  const clauses = String(message || '').split(/[，,。；;\n]/);
+  const positive = clauses.filter(part => !/^\s*(?:请)?(?:不要|不用|不必|无需|别|不想|不需要)/.test(part));
+  const text = positive.join('，');
+  const query = /^(?:请|帮我|给我|麻烦)*(?:查看|查询|打开|找出)/.test(text) &&
+    !/(?:[，,。；;]|然后|接着|之后|后)(?:再|请|帮我)?(?:生成|制作|绘制|画|做)/.test(text);
+  if (query) return { type: /图片|图像|生图|海报|封面|产品.*图/.test(text) ? 'image-query' : 'query' };
   const target = text.replace(/视频(?:的)?封面(?:图片|图)?/g, '封面图');
-  const action = '(?:生成|制作|创作|设计|绘制|画|做|生|转成|转为|转换成|转换为)';
-  const image = /文生图|(?:^|[^视])生图/.test(target) || new RegExp(action + '[^，,。；;\\n]{0,80}?(?:图片|图像|海报|封面|插画|头像|产品图|商品图|宣传图|张图|幅图)').test(target);
-  let video = /图生视频|文生视频/.test(target) || new RegExp(action + '[^，,。；;\\n]{0,80}?(?:视频|短片|影片|动画)').test(target);
-  if (image && /(?:[一二两三四五六七八1-8]|几)[张幅]/.test(target) &&
+  const action = '(?:生成|制作|创作|设计|绘制|画(?!幅|面|质)|做|生(?=图)|转成|转为|转换成|转换为)';
+  const tail = '[^，,。；;\\n]{0,100}?';
+  const picture = '(?:图片|图像|海报|封面|插画|头像|照片|(?:[一二两三四五六七八九十百0-9]+|几|多|数)\\s*[张幅]|[\\p{Script=Han}A-Za-z0-9]{0,12}图(?=$|[\\s，,。；;！!？?]|用于|用作|作为))';
+  const image = /文生图|(?:^|[^视])生图|(?:^|[，,])(?:请|帮我|给我)?画(?!幅|面|质)/.test(target) || new RegExp(action + tail + picture, 'u').test(target);
+  let video = /图生视频|文生视频|(?:让|把|使).*(?:动起来|运动起来)/.test(target) || new RegExp(action + tail + '(?:视频|短片|影片|动画)').test(target);
+  if (image && /(?:[一二两三四五六七八九十0-9]|几)[张幅]/.test(target) &&
       /(?:用于|用作|作为)[^，,。；;\n]*视频/.test(target) && !/(?:同时|再生成|并生成|一段视频|一条视频)/.test(target)) video = false;
-  return image === video ? null : image ? 'image' : 'video';
+  const creation = new RegExp(action).test(target) || /动起来|运动起来/.test(target);
+  return { type: image && video ? 'mixed' : image ? 'image' : video ? 'video' : null, creation,
+    blocked: positive.length < clauses.length && !creation };
 }
 
-export function normalizeGenerationIntent(message, intent) {
-  const target = explicitMediaIntent(message);
-  if (!target) return intent;
-  if (target === 'image-query') return { ...intent, generate: false, generateImage: false, imageQuery: true, publish: false, taskQuery: false, query: false };
+export function explicitMediaIntent(message) {
+  const { type } = mediaEvidence(message);
+  return ['image', 'video', 'image-query'].includes(type) ? type : null;
+}
+
+export function normalizeGenerationIntent(message, intent, { mediaType } = {}) {
+  const evidence = mediaEvidence(message);
+  const manual = ['image', 'video'].includes(mediaType);
+  const target = manual ? mediaType : evidence.type;
+  if (target === 'image-query') return { ...intent, mediaType: 'unspecified', needsMediaChoice: false, generate: false, generateImage: false, imageQuery: true, publish: false, taskQuery: false, query: false };
+  if (!manual && (target === 'query' || evidence.blocked)) return { ...intent, mediaType: 'unspecified', needsMediaChoice: false, generate: false, generateImage: false };
+  if (!target && !evidence.creation && !intent.needsMediaChoice && !(intent.generate && intent.generateImage)) {
+    const typed = ['image', 'video'].includes(intent.mediaType) ? intent.mediaType : null;
+    if (!typed) return { ...intent, needsMediaChoice: false };
+    return { ...intent, generate: typed === 'video', generateImage: typed === 'image', needsMediaChoice: false };
+  }
+  if (!['image', 'video'].includes(target)) return { ...intent, mediaType: 'unspecified', needsMediaChoice: true,
+    generate: false, generateImage: false, imageQuery: false, publish: false, taskQuery: false, query: false };
   const image = target === 'image';
   const wrongFlow = image ? intent.generate === true || intent.generateImage !== true : intent.generateImage === true || intent.generate !== true;
-  return { ...intent, generate: !image, generateImage: image, imageQuery: false,
-    ...(wrongFlow ? { prompt: message.trim(), taskQuery: false, query: false, ...(image ? { publish: false } : {}) } : {}) };
+  return { ...intent, mediaType: target, needsMediaChoice: false, generate: !image, generateImage: image, imageQuery: false,
+    ...(wrongFlow || manual ? { prompt: message.trim(), taskQuery: false, query: false, ...(image ? { publish: false } : {}) } : {}) };
 }
 
 const standard = {

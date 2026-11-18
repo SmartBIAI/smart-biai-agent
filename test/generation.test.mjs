@@ -89,13 +89,54 @@ test('both AI providers normalize an explicit image request before returning it 
   try {
     for (const provider of ['deepseek', 'doubao']) {
       const wrong = JSON.stringify({ generate: true, generateImage: false, prompt: '生成视频' });
-      globalThis.fetch = async () => new Response(JSON.stringify(provider === 'deepseek' ?
-        { stop_reason: 'end_turn', content: [{ type: 'text', text: wrong }] } :
-        { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: wrong }] }] }));
-      const intent = await understand({ provider, model: 'test-model', key: 'test-key' }, '生成图片', ['生成一段视频']);
-      assert.equal(intent.generateImage, true); assert.equal(intent.generate, false); assert.equal(intent.prompt, '生成图片');
+      let payload;
+      globalThis.fetch = async (url, options) => {
+        payload = JSON.parse(options.body);
+        return new Response(JSON.stringify(provider === 'deepseek' ?
+          { stop_reason: 'end_turn', content: [{ type: 'text', text: wrong }] } :
+          { status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: wrong }] }] }));
+      };
+      const message = '用参考图中的挡水帽，生成一张产品使用图，小孩在浴盆带着图中挡水帽洗头。';
+      const intent = await understand({ provider, model: 'test-model', key: 'test-key' }, message, ['生成一段视频'], false, { attachments: [{ type: 'image' }] });
+      assert.equal(intent.generateImage, true); assert.equal(intent.generate, false); assert.equal(intent.prompt, message);
+      const input = JSON.parse(provider === 'deepseek' ? payload.messages[0].content : payload.input[0].content);
+      assert.deepEqual(input.attachments, [{ type: 'image' }]);
+      assert.equal(input.history[0], '生成一段视频');
     }
   } finally { globalThis.fetch = original; }
+});
+
+test('reference image descriptions identify the requested output rather than the input material', () => {
+  const images = [
+    '用参考图中的挡水帽，生成一张产品使用图，小孩在浴盆带着图中挡水帽洗头。',
+    '根据参考图生成两张儿童洗头场景图', '生成产品使用图', '做一幅小孩洗头的画', '生成一张照片',
+    '生成3张用于视频的产品使用图', '用视频中的挡水帽制作一张商品主图', '生成白底图'
+  ];
+  for (const message of images) {
+    const intent = normalizeGenerationIntent(message, { mediaType: 'video', generate: true, generateImage: false });
+    assert.equal(intent.mediaType, 'image', message); assert.equal(intent.generateImage, true, message);
+    assert.equal(intent.generate, false, message); assert.equal(intent.needsMediaChoice, false, message);
+    assert.equal(interpret(message).generateImage, true, message);
+  }
+  for (const message of ['用这3张参考图生成一条6秒视频', '把产品使用图做成视频', '让参考图里的小孩动起来', '生成一条视频，画幅9:16']) {
+    const intent = normalizeGenerationIntent(message, { mediaType: 'image', generateImage: true });
+    assert.equal(intent.mediaType, 'video', message); assert.equal(intent.generateImage, false, message);
+    assert.equal(interpret(message).generate, true, message);
+  }
+});
+
+test('unspecified and mixed creative requests ask for a media choice instead of assuming video', () => {
+  for (const message of ['生成一个', '用参考图生成一个', '根据参考图做一个小孩洗头的场景', '先生成图片，再生成视频']) {
+    const intent = normalizeGenerationIntent(message, { mediaType: 'video', generate: true });
+    assert.equal(intent.needsMediaChoice, true, message); assert.equal(intent.generate, false, message);
+    assert.equal(intent.generateImage, false, message); assert.equal(interpret(message).needsMediaChoice, true, message);
+    const chosen = normalizeGenerationIntent(message, intent, { mediaType: 'image' });
+    assert.equal(chosen.generateImage, true); assert.equal(chosen.generate, false); assert.equal(chosen.needsMediaChoice, false);
+  }
+  for (const message of ['不要生成图片', '不要把图片生成视频', '查看生成图片的记录']) {
+    const intent = normalizeGenerationIntent(message, { generate: true, generateImage: true });
+    assert.equal(intent.generate, false, message); assert.equal(intent.generateImage, false, message);
+  }
 });
 
 test('image spec and mask requirements follow the selected model', () => {

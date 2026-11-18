@@ -493,9 +493,17 @@ async function bootstrap(mode) {
 
 async function agent(body, mode) {
   const message = validateText(body.message, 2000, '消息');
+  const fileIds = body.fileIds ?? [];
+  if (!Array.isArray(fileIds) || fileIds.length > 9) fail(400, '每条消息最多添加 9 个文件。');
+  const attachments = fileIds.map(id => {
+    validId(id);
+    const file = database.prepare('SELECT name FROM uploaded_file WHERE id = ?').get(id);
+    if (!file) fail(404, '找不到参考附件，请重新上传。');
+    return { type: mediaTypes[extname(file.name).toLowerCase()][0] };
+  });
   if (mode === 'mock') return interpret(message);
   const history = Array.isArray(body.history) ? body.history.slice(-5).filter(item => typeof item === 'string').map(item => item.slice(0, 1000)) : [];
-  const intent = await understand(configuration('ai'), message, history);
+  const intent = await understand(configuration('ai'), message, history, false, { attachments });
   let found = [];
   let accountError;
   let limited;

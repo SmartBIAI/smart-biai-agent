@@ -361,7 +361,7 @@ function renderChat() {
       if (!task) return assistant('<p>这条发布任务暂不可查看。</p>');
       return assistant(`<div class="confirmed"><span class="confirmed-icon">${icon('check')}</span><div><strong>${task.planned ? '已确认排期' : '已确认发布'}</strong><p>${esc(task.title)} · ${esc(taskAccount(task)?.name)}${task.planned ? ` · ${dateFormat(task.planned, task.zone)} ${zoneLabels[task.zone] ?? esc(task.zone)}` : ''}</p></div><a class="button" href="#tasks/${task.id}">查看任务 ${icon('arrow', 15)}</a></div>`);
     }
-    return assistant(`<p>${esc(entry.text)}</p>${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
+    return assistant(`<p>${esc(entry.text)}</p>${entry.mediaChoice ? entry.mediaChoice.chosen ? `<p class="field-note">已选择生成${entry.mediaChoice.chosen === 'image' ? '图片' : '视频'}</p>` : `<div class="detail-actions"><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="image">${icon('image')} 生成图片</button><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="video">${icon('video')} 生成视频</button></div>` : ''}${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
   }).join('') + (state.intentBusy ? assistant('<p class="muted">正在处理你的请求…</p>') : '');
   box.scrollTop = box.scrollHeight;
 }
@@ -646,13 +646,20 @@ function renderSettings() {
 
 function textEntry(text, details = {}) { state.chat.push({ type: 'text', text, ...details }); }
 
-async function sendMessage(message) {
+async function sendMessage(message, { mediaType, referenceFiles, understood, choice } = {}) {
   const value = message.trim();
   if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy) return;
+  if (referenceFiles === undefined && !state.attachments.length && /^(?:生成)?(?:图片|图像|视频)$/.test(value)) {
+    const pending = state.chat.at(-1);
+    if (pending?.mediaChoice && !pending.mediaChoice.chosen) {
+      state.chat.push({ type: 'user', text: value });
+      return sendMessage(pending.mediaChoice.message, { mediaType: /视频/.test(value) ? 'video' : 'image', referenceFiles: pending.files || [], understood: pending.mediaChoice.intent, choice: pending });
+    }
+  }
   const chat = state.chat;
   const history = chat.filter(entry => entry.type === 'user').slice(-5).map(entry => entry.text);
-  const files = state.attachments.splice(0);
-  chat.push({ type: 'user', text: value, ...(files.length ? { files } : {}) });
+  const files = referenceFiles ?? state.attachments.splice(0);
+  if (!choice) chat.push({ type: 'user', text: value, ...(files.length ? { files } : {}) });
   if (!value) textEntry('文件已保存到工作台。');
   saveChat();
   state.intentBusy = Boolean(value);
@@ -660,8 +667,14 @@ async function sendMessage(message) {
   renderChat();
   if (!value) return;
   try {
-    const intent = normalizeGenerationIntent(value, await request('agent', { message: value, history }));
+    const intent = normalizeGenerationIntent(value, understood ?? await request('agent', { message: value, history, fileIds: files.map(file => file.id) }), { mediaType });
     if (state.chat !== chat) return;
+    if (intent.needsMediaChoice) {
+      textEntry('这次先生成图片还是视频？请选择，也可以直接回复“图片”或“视频”。原始描述和参考附件会保留。', {
+        mediaChoice: { id: crypto.randomUUID(), message: value, intent }, files
+      });
+      return;
+    }
     intent.zone = suggestedZone(value);
     intent.planned = scheduleSuggestion(value, intent.zone);
     if (intent.publish && (intent.planned || /定时|排期|预约|明早|明天|后天|(?:本|下)周/.test(value))) intent.requiresSchedule = true;
@@ -705,6 +718,7 @@ async function sendMessage(message) {
     } else if (!intent.query && !intent.generateImage) {
       textEntry(intent.message || '试试「查询 TikTok 账号」、「生成一张产品海报」、「生成一支竖屏产品视频」或「把视频发到品牌主号」。');
     }
+    if (choice && (intent.generate || intent.generateImage)) choice.mediaChoice.chosen = mediaType;
   } catch (error) {
     if (state.chat === chat) textEntry(error.message);
   } finally {
@@ -1003,6 +1017,13 @@ main.addEventListener('click', async event => {
   const { action, id } = control.dataset;
   switch (action) {
     case 'prompt': void sendMessage(control.dataset.message); break;
+    case 'choose-media': {
+      const entry = state.chat.find(item => item.mediaChoice?.id === id && !item.mediaChoice.chosen);
+      if (entry && ['image', 'video'].includes(control.dataset.mediaType)) void sendMessage(entry.mediaChoice.message, {
+        mediaType: control.dataset.mediaType, referenceFiles: entry.files || [], understood: entry.mediaChoice.intent, choice: entry
+      });
+      break;
+    }
     case 'new-chat': void changeConversation(); break;
     case 'upload': if (!state.uploadBusy) document.querySelector('#attachment-files').click(); break;
     case 'remove-file': state.attachments.splice(Number(control.dataset.index), 1); renderAttached(); break;

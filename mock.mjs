@@ -23,7 +23,7 @@ export function interpret(message) {
   const id = message.match(/(?:ID\s*[:：]?\s*|账号\s*)(\d+)/i)?.[1];
   const imageQuery = /(?:查看|查询|打开).*(?:图片|生图|图像|海报)/.test(message);
   const generateImage = !imageQuery && /生图|画一|画张|画个|(?:生成|做一|创作|制作|设计).*(?:图片|图像|海报|插画|封面|张图)/.test(message) && !/图生视频/.test(message);
-  const generate = !imageQuery && /生成|做一|创作|制作|文生视频|图生视频/.test(message) && (!generateImage || /(?:生成|制作|做一).*视频/.test(message));
+  const generate = !imageQuery && /(?:生成|制作|创作|做一).*(?:视频|短片|影片|动画)|文生视频|图生视频/.test(message) && !generateImage;
   const selectedModel = [...models, ...imageModels].filter(model => message.toLowerCase().includes(model.id.toLowerCase()) || message.toLowerCase().replaceAll(' ', '').includes(model.name.toLowerCase().replaceAll(' ', ''))).sort((a, b) => b.name.length - a.name.length)[0];
   const publish = /发布|发到|发给|排期|定时|安排.*发/.test(message);
   const taskQuery = /(?:查询|查看|跟踪).*(?:任务|发布状态)|发布进度|发成功了吗/.test(message) && !generate;
