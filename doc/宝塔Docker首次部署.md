@@ -1,6 +1,6 @@
 # Docker 部署指南
 
-本指南从公开仓库构建镜像，使用 Docker Compose 运行一个持久化的共享工作台，并通过 Nginx 提供 HTTPS 访问。宝塔用户可在站点配置页面应用同样的代理规则。
+本指南介绍从公开仓库构建镜像、使用 Docker Compose 启动工作台，以及通过 Nginx 配置 HTTPS 访问。数据保存在服务器目录中，更新容器后可继续使用。宝塔用户可在面板中配置相同的代理规则。
 
 ## 环境要求
 
@@ -84,25 +84,25 @@ location ^~ /smart-biai-agent/ {
 
 执行 `nginx -t`，通过后重载 Nginx。宝塔默认安装可使用 `/www/server/nginx/sbin/nginx -t`，再在面板重载。若 Nginx 运行在容器中，需要让它能够访问应用容器，并按实际容器网络设置 `proxy_pass`。
 
-打开 `https://agent.example.com/smart-biai-agent/`，在登录页输入 `.env` 中设置的工作台账号和密码，可选择保持登录 7 天。登录后可在右上角退出。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。跳转采用 301，以兼容旧版 Nginx；版本差异见 [Nginx return 指令说明](https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#return)。
+打开 `https://agent.example.com/smart-biai-agent/`，在登录页输入 `.env` 中设置的工作台账号和密码，可选择保持登录 7 天。登录后可在右上角退出。若自定义路径，请同时修改 `BIAI_BASE_PATH` 与两段 Nginx 路径。
 
 ### 自定义访问路径
 
-例如，希望正式应用位于 `/agent/`，首次启动前将 `.env` 中的 `BIAI_BASE_PATH` 改为 `/agent`，并让 Nginx 的两个 `location` 使用同一路径。`proxy_pass` 保留完整请求路径，端口后省略末尾斜杠。
+例如，希望应用位于 `/agent/`，首次启动前将 `.env` 中的 `BIAI_BASE_PATH` 改为 `/agent`，并让 Nginx 的两个 `location` 使用同一路径。`proxy_pass` 保留完整请求路径，端口后省略末尾斜杠。
 
 `BIAI_PUBLIC_ORIGIN` 和 `BIAI_MEDIA_PUBLIC_ORIGIN` 只填写 HTTPS 域名。URL 前缀与部署目录、数据目录分别配置。
 
 已经启动的实例更改 `.env` 后，需要在部署目录执行 `sh start.sh`，让容器读取新配置。
 
-## 连接与验收
+## 连接服务并开始使用
 
-1. 先用模拟模式查账号、生成示例视频并确认模拟发布，检查刷新后是否能恢复记录。
-2. 在「连接设置」填写 Smart BIAI 社媒 App ID、Access Token、视频 API Key，以及 DeepSeek 或豆包配置。
-3. 切到真实模式，确认授权账号和可用视频模型能够加载。查看生成报价后再确认真实生成。
+1. 先用模拟模式查询账号、预览示例图片或视频并体验模拟发布，刷新后可继续查看记录。
+2. 在「连接设置」填写 Smart BIAI 社媒 App ID、Access Token、图片与视频共用的应用 API Key，以及 DeepSeek 或豆包配置。Smart BIAI 凭证可从 [官网](https://www.biaibiai.com/) 获取或申请。
+3. 切到真实模式，查看已授权账号及可用的图片、视频模型。检查报价和参数后再确认生成。
 4. 参考素材选择 OSS 或本地文件服务器。选择本地方式时，填写自己的公网 HTTPS 域名，容器附件目录留空。应用会为素材生成带路径前缀的限时链接。
-5. 视频生成后先预览，选定有发布权限的测试账号，检查文案和时间，再确认发布。
+5. 视频生成后先预览，选定自己的已授权账号，检查文案和时间，再确认立即发布或定时发布。
 
-## 数据和运行管理
+## 数据保存与日常使用
 
 `deploy/data/` 保存数据库、对话、附件和加密密钥，`deploy/.env` 保存启动配置。容器重建时沿用这两个位置即可继续读取记录。自定义附件目录应位于持久化挂载内，例如 `/data/uploads`。
 
@@ -156,4 +156,4 @@ curl -fsS http://127.0.0.1:4178/healthz
 | 请求返回 403 | 检查公网域名、`BIAI_PUBLIC_ORIGIN` 和转发的 `Host` 是否一致。 |
 | 页面资源返回 404 | 检查 URL 路径前缀、末尾斜杠和 Nginx 代理规则。 |
 | 数据目录无写入权限 | 确认容器 UID 1000 可以读写数据目录。 |
-| 登录后又回到登录页 | 核对账号密码，通过已配置的 HTTPS 正式域名访问，确认浏览器允许本站 Cookie，代理保留 Cookie 与子路径。 |
+| 登录后又回到登录页 | 核对账号密码，通过已配置的 HTTPS 域名访问，确认浏览器允许本站 Cookie，代理保留 Cookie 与子路径。 |

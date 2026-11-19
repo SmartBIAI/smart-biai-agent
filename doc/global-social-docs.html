@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#5142df"><title>Smart BIAI 海外社媒运营开放接口文档</title><meta name="description" content="Smart BIAI 海外社媒运营 API 文档：账号查询、视频素材与标签、TikTok、YouTube、Instagram 视频发布、幂等重试及任务状态查询。"><link rel="canonical" href="https://developer.biaibiai.com/global-social-docs"><style>:root { color-scheme: light; font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif; color: #29293d; background: #fff; --purple: #5142df; --line: #e8e8f0; --muted: #72758a; }
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#5142df"><title>Smart BIAI 海外社媒运营开放接口文档</title><meta name="description" content="Smart BIAI 海外社媒运营 API 文档：账号查询、视频素材与标签、TikTok、YouTube、Facebook、Instagram 视频发布、幂等重试及任务状态查询。"><link rel="canonical" href="https://developer.biaibiai.com/global-social-docs"><style>:root { color-scheme: light; font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif; color: #29293d; background: #fff; --purple: #5142df; --line: #e8e8f0; --muted: #72758a; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 100px; }
 body { margin: 0; }
@@ -133,7 +133,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mon
 }
 </style></head><body><a class="skip-link" href="#main-content">跳到文档正文</a>
 <header class="site-header"><div class="header-inner"><a class="brand" href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer"><span class="brand-mark" aria-hidden="true">B</span><span>Smart BIAI</span><small>开发者文档</small></a><nav class="header-links" aria-label="相关入口"><a class="secondary-link" href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">图片与视频 API ↗</a><a class="secondary-link" href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a class="header-cta" href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">获取 API 凭证 ↗</a></nav></div></header>
-<div class="doc-shell"><aside class="sidebar" aria-label="文档侧栏"><div class="sidebar-label">SOCIAL MEDIA OPEN API</div><nav class="doc-nav" aria-label="章节目录"><a href="#1-概述"><span class="nav-number">01</span><span>概述</span></a><a href="#2-请求与响应约定"><span class="nav-number">02</span><span>请求与响应约定</span></a><a href="#3-查询社媒账号"><span class="nav-number">03</span><span>查询社媒账号</span></a><a href="#4-登记视频素材"><span class="nav-number">04</span><span>登记视频素材</span></a><a href="#5-视频标签"><span class="nav-number">05</span><span>视频标签</span></a><a href="#6-创建视频发布任务"><span class="nav-number">06</span><span>创建视频发布任务</span></a><a href="#7-查询发布任务状态"><span class="nav-number">07</span><span>查询发布任务状态</span></a><a href="#8-错误处理与重试"><span class="nav-number">08</span><span>错误处理与重试</span></a><a href="#9-推荐接入流程"><span class="nav-number">09</span><span>推荐接入流程</span></a><a href="#10-常见问题"><span class="nav-number">10</span><span>常见问题</span></a><a href="#11-相关资源"><span class="nav-number">11</span><span>相关资源</span></a></nav><div class="connection-card"><span>API BASE URL</span><code>https://border-api.biaibiai.com/open-api</code><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">申请 App ID 与 Access Token ↗</a></div><div class="sidebar-footer">TikTok · YouTube · Instagram<br>接口前缀 /v1 · 6 个开放接口</div></aside>
+<div class="doc-shell"><aside class="sidebar" aria-label="文档侧栏"><div class="sidebar-label">SOCIAL MEDIA OPEN API</div><nav class="doc-nav" aria-label="章节目录"><a href="#1-概述"><span class="nav-number">01</span><span>概述</span></a><a href="#2-请求与响应约定"><span class="nav-number">02</span><span>请求与响应约定</span></a><a href="#3-查询社媒账号"><span class="nav-number">03</span><span>查询社媒账号</span></a><a href="#4-登记视频素材"><span class="nav-number">04</span><span>登记视频素材</span></a><a href="#5-视频标签"><span class="nav-number">05</span><span>视频标签</span></a><a href="#6-创建视频发布任务"><span class="nav-number">06</span><span>创建视频发布任务</span></a><a href="#7-查询发布任务状态"><span class="nav-number">07</span><span>查询发布任务状态</span></a><a href="#8-错误处理与重试"><span class="nav-number">08</span><span>错误处理与重试</span></a><a href="#9-推荐接入流程"><span class="nav-number">09</span><span>推荐接入流程</span></a><a href="#10-常见问题"><span class="nav-number">10</span><span>常见问题</span></a><a href="#11-相关资源"><span class="nav-number">11</span><span>相关资源</span></a></nav><div class="connection-card"><span>API BASE URL</span><code>https://border-api.biaibiai.com/open-api</code><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">申请 App ID 与 Access Token ↗</a></div><div class="sidebar-footer">TikTok · YouTube · Instagram · Facebook<br>接口前缀 /v1 · 6 个开放接口</div></aside>
 <main class="doc-main" id="main-content"><details class="mobile-toc"><summary>文档目录 · 6 个开放接口</summary><nav class="doc-nav" aria-label="移动端章节目录"><a href="#1-概述"><span class="nav-number">01</span><span>概述</span></a><a href="#2-请求与响应约定"><span class="nav-number">02</span><span>请求与响应约定</span></a><a href="#3-查询社媒账号"><span class="nav-number">03</span><span>查询社媒账号</span></a><a href="#4-登记视频素材"><span class="nav-number">04</span><span>登记视频素材</span></a><a href="#5-视频标签"><span class="nav-number">05</span><span>视频标签</span></a><a href="#6-创建视频发布任务"><span class="nav-number">06</span><span>创建视频发布任务</span></a><a href="#7-查询发布任务状态"><span class="nav-number">07</span><span>查询发布任务状态</span></a><a href="#8-错误处理与重试"><span class="nav-number">08</span><span>错误处理与重试</span></a><a href="#9-推荐接入流程"><span class="nav-number">09</span><span>推荐接入流程</span></a><a href="#10-常见问题"><span class="nav-number">10</span><span>常见问题</span></a><a href="#11-相关资源"><span class="nav-number">11</span><span>相关资源</span></a></nav></details><p class="eyebrow">SMART BIAI OPEN API / SOCIAL</p><article class="article"><h1 id="smart-biai-海外社媒运营开放接口文档"><span class="title-brand">Smart BIAI</span> <span class="title-subject">海外社媒运营开放接口文档</span></h1>
 <p class="doc-meta">文档更新：2026-11-19 · 接口前缀：<code>/v1</code></p>
 <p class="resource-links"><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">Smart BIAI 官网</a> · <a href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">图片与视频生成 API</a> · <a href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noopener noreferrer">Smart BIAI Agent 开源项目</a> · <a href="https://developer.biaibiai.com/smart-biai-agent-static/" target="_blank" rel="noopener noreferrer">BIAI Agent 在线体验</a></p>
@@ -183,8 +183,8 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mon
 </tr>
 </tbody>
 </table></div>
-<p>当前说明涉及 <strong>TikTok、YouTube、Instagram</strong>。可发布账号、服务有效期与发布能力，以账号授权、应用权限及平台要求为准。</p>
-<p>本文不包含账号绑定或重新授权、账号及作品运营统计、平台全量历史作品查询、图片发布和主动取消已提交发布任务的接口。图片与视频生成属于另一组 API，见上方生成 API 文档。</p>
+<p>支持 <strong>TikTok、YouTube、Instagram 和 Facebook</strong>。本文请求示例使用 TikTok、YouTube 与 Instagram 的平台编码；可发布账号与范围取决于账号授权、应用权限、服务有效期及平台要求。</p>
+<p>账号接入与重新授权在 Smart BIAI 完成。本文列出的 6 个接口提供账号查询与视频发布相关能力，暂未提供账号及作品统计、平台全量历史作品查询、图片发布或已提交任务的取消接口。图片与视频生成请参阅 <a href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">生成 API 文档</a>。</p>
 <h3 id="11-两种视频发布方式">1.1 两种视频发布方式</h3>
 <div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
 <thead>
@@ -216,7 +216,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mon
 <p>完整请求地址由服务地址加接口路径组成，例如：</p>
 <div class="code-block"><div class="code-toolbar"><span class="code-language">TEXT</span><button type="button" class="copy-button" data-copy="example-2" aria-label="复制 TEXT 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="TEXT 示例代码"><code class="language-text" id="example-2">https://border-api.biaibiai.com/open-api/v1/account/page
 </code></pre></div>
-<p>该地址与图片、视频生成服务地址不同。<strong>社媒 App ID + Access Token 与生成服务的应用 API Key 是两组凭证，不能混用。</strong></p>
+<p>社媒服务使用配套的 <strong>App ID 与 Access Token</strong>；图片与视频生成使用生成服务的 <strong>应用 API Key</strong>。两组服务分别配置对应的地址和凭证。</p>
 <h3 id="22-请求头">2.2 请求头</h3>
 <div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
 <thead>
@@ -249,7 +249,7 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mon
 </tr>
 </tbody>
 </table></div>
-<p>本文仅对 <code>POST /v1/publish/videos</code> 约定必填幂等请求头。不要将发布接口的幂等保证推定为其他写接口的保证。</p>
+<p><code>Idempotency-Key</code> 用于 <code>POST /v1/publish/videos</code> 的重试处理，其他写接口的重试方式请参阅各节说明。</p>
 <p>凭证应由应用后端保存并调用，避免将完整 Access Token 写入网页源码、公开仓库或公开日志。</p>
 <h3 id="23-参数与分页">2.3 参数与分页</h3>
 <ul>
@@ -325,6 +325,7 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 </tr>
 </tbody>
 </table></div>
+<p>以下列出本文示例使用的平台编码；其他平台请使用账号查询返回的 <code>platform</code> 值。</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
 <thead>
 <tr>
@@ -347,7 +348,7 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 </tr>
 </tbody>
 </table></div>
-<p>国家、名称和别名可以使用返回字段在调用方筛选。本接口当前参数表未定义 <code>country</code>、<code>name</code>、<code>keyword</code> 等服务端筛选参数，不应自行假定传入即可生效。</p>
+<p>按国家、名称或别名筛选时，可先分页获取账号，再依据返回字段筛选。本接口支持的查询参数见上表。</p>
 <h4 id="请求示例">请求示例</h4>
 <div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-6" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-6">curl --get "$BIAI_SOCIAL_BASE_URL/v1/account/page" \
   -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
@@ -478,10 +479,10 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 </tr>
 </tbody>
 </table></div>
-<p>调用方必须在确认发布前检查账号状态；定时发布到期时也应重新检查。未知状态按不可发布处理。账号需要授权或恢复授权时，在 Smart BIAI 完成相应操作。</p>
+<p>发布前检查账号授权状态；定时发布到期时也需重新检查。仅在状态为 <code>20</code> 且满足其他发布条件时提交任务。账号需要授权或恢复授权时，请在 Smart BIAI 完成操作。</p>
 <h2 id="4-登记视频素材">4. 登记视频素材</h2>
 <h3 id="post-v1materialvideobatch-create" class="endpoint"><span class="method post">POST</span><code>/v1/material/video/batch-create</code></h3>
-<p>批量登记已有视频的地址和信息，返回可用于发布的素材 ID。该接口名称中的“上传”指提交素材记录，<strong>不接收文件二进制，不使用 multipart，不会把视频文件上传或转存到 Smart BIAI</strong>。</p>
+<p>批量登记已有视频的地址和信息，返回可用于发布的素材 ID。使用 JSON 提交地址与资料即可，<strong>视频文件仍保存在原地址，素材登记不会上传或转存文件</strong>。</p>
 <p>如果仅需要使用现成视频地址发布，可以跳过本接口，直接在发布请求中使用 <code>videoUrl</code>。</p>
 <h4 id="请求体">请求体</h4>
 <p>请求体为对象数组，下表字段作用于数组中的每一项。</p>
@@ -703,7 +704,7 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 <li>服务返回“处理中”时等待后再查询或使用原请求恢复结果，不要立即创建另一批发布任务。</li>
 <li><code>clientTaskId</code> 用于本地与远端任务关联，不能代替必填的幂等请求头。</li>
 </ul>
-<p>本文不承诺幂等记录的具体保留时长。长时间无法确定受理结果时，应保留待核实状态并核对原任务，避免使用新键重复发布。</p>
+<p>幂等记录的保留时间以服务实际规则为准。长时间无法确定请求是否成功时，请保留原键与请求体并核对原任务，避免使用新键重复发布。</p>
 <h4 id="请求体_1">请求体</h4>
 <p>请求体为对象数组，下表字段作用于每一项。</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
@@ -958,8 +959,8 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 </tr>
 </tbody>
 </table></div>
-<p>该状态表描述服务返回值，不代表本文提供了取消接口。调用方尚未提交的本地排期可以自行取消；已提交任务不能仅删除本地记录就视为平台已取消。</p>
-<p>建议处理中任务每 5～10 秒查询一次；这是调用方的轮询建议，不是接口承诺的频率上限。遇到限流时降低频率，并在服务返回 <code>Retry-After</code> 时遵循该值。遇到未知状态时保留原值并标记待核实，不应直接认定成功或创建新的发布任务。</p>
+<p>状态 <code>50</code> 用于识别服务返回的取消结果。本文接口暂未提供取消操作；尚未提交的本地排期可由调用方取消，已提交任务仍需按远端状态跟踪。</p>
+<p>调用方可按每 5～10 秒一次查询处理中任务，此间隔仅为实现建议。遇到限流时降低频率，服务返回 <code>Retry-After</code> 时按该值等待。遇到未知状态时，保留原值并继续核实，再决定后续操作。</p>
 <p>本接口查询的是<strong>社媒视频发布任务</strong>，不用于查询 AI 图片或视频生成状态。</p>
 <h4 id="成功响应_3">成功响应</h4>
 <p><code>data</code> 为单个任务对象，字段与创建发布响应中的单项相同：</p>
@@ -980,7 +981,7 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
   }
 }
 </code></pre></div>
-<p>不要自行假定任务会返回社媒作品链接、播放量或粉丝数据；本文定义的返回字段不包含这些信息。</p>
+<p>本接口返回发布任务信息，作品链接、播放量和粉丝数据不在当前返回字段中。</p>
 <h2 id="8-错误处理与重试">8. 错误处理与重试</h2>
 <h3 id="81-http-状态">8.1 HTTP 状态</h3>
 <div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
@@ -1092,11 +1093,11 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 </tr>
 </tbody>
 </table></div>
-<p>错误码需要与具体接口和 <code>msg</code> 一起判断。页面可展示具体原因，长文本可截断摘要并提供完整详情；不要只显示“失败”而丢弃服务返回的信息。记录诊断信息时隐藏凭证。</p>
-<p>区分两种情况：</p>
+<p>排查错误时，请结合接口、错误码和 <code>msg</code> 查看具体原因。建议在页面显示错误摘要，并提供完整详情；记录日志或反馈问题时隐藏凭证。</p>
+<p>常见失败可分为：</p>
 <ul>
-<li><strong>请求失败</strong>：HTTP 失败或业务 <code>code</code> 非 0。特别是超时、处理中和受理结果不明时，不能推定没有创建任务。</li>
-<li><strong>任务失败</strong>：请求 <code>code=0</code>，但返回的发布任务 <code>status=40</code>。这是异步发布失败；保留任务及可用的 <code>remark</code>，核对后再决定是否创建新的尝试。</li>
+<li><strong>请求失败</strong>：HTTP 失败或业务 <code>code</code> 非 0。超时或连接中断时，任务仍可能已经创建，请按原幂等请求恢复结果。</li>
+<li><strong>任务失败</strong>：请求 <code>code=0</code>，但发布任务 <code>status=40</code>。保留任务与 <code>remark</code>，查看原因后再决定是否创建新的尝试。</li>
 </ul>
 <h2 id="9-推荐接入流程">9. 推荐接入流程</h2>
 <h3 id="91-立即发布">9.1 立即发布</h3>
@@ -1163,7 +1164,7 @@ export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
 <p><strong>必须先调用视频素材登记接口吗？</strong></p>
 <p>不必。发布接口支持 <code>videoUrl</code> 直链，也支持已登记的 <code>videoId</code>。同一项同时传入时优先使用 <code>videoId</code>；需要切换素材时先核对是否误带了旧 ID。</p>
 <p><strong>登记素材后可以删除源视频或等待源链接过期吗？</strong></p>
-<p>不可以据此假定视频已被存储。登记只保存记录，发布处理仍需要能够访问源视频。应确保源链接和源文件在处理期间有效。</p>
+<p>素材登记只保存记录，发布处理仍需读取原视频。请确保源链接和源文件在处理期间有效。</p>
 <p><strong>没有视频封面怎么办？</strong></p>
 <p>封面可留空。使用生成服务返回的封面地址；没有时传 <code>coverUrl: ""</code>，不要求为发布额外生成封面。</p>
 <p><strong>发布请求超时了，可以换一个幂等键再发吗？</strong></p>
