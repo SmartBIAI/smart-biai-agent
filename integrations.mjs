@@ -25,7 +25,46 @@ function integer(value) {
   return JSON.rawJSON(value);
 }
 
-async function jsonRequest(service, url, { headers = {}, body, timeout = 15000, frozen = false } = {}) {
+// Keep the provider's reason and code, without exposing arbitrary response fields.
+export function apiErrorMessage(value, secrets = []) {
+  const text = (item, depth = 0) => {
+    if (depth > 6 || item == null) return '';
+    if (typeof item === 'string') return item.trim();
+    if (Array.isArray(item)) return [...new Set(item.map(entry => text(entry, depth + 1)).filter(Boolean))].join('\n');
+    if (typeof item !== 'object') return '';
+    const message = ['error', 'message', 'msg', 'detail'].map(key => text(item[key], depth + 1)).find(Boolean) || '';
+    const code = ['string', 'number'].includes(typeof item.code) ? String(item.code) : '';
+    const location = typeof item.field === 'string' ? item.field : Array.isArray(item.loc) ? item.loc.join('.') : '';
+    const summary = `${location && message ? `${location}: ` : ''}${message}${code && !message.includes(code) ? `${message ? ' ' : ''}（${code}）` : ''}`;
+    const fields = text(item.fields, depth + 1);
+    return [summary, fields].filter(Boolean).join('\n');
+  };
+  let message = text(value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
+  for (const secret of secrets.filter(item => typeof item === 'string' && item.length >= 8)) {
+    message = message.replaceAll(secret, '[已隐藏]');
+  }
+  return message.replace(/\bBearer\s+[^\s"'<>]+/gi, 'Bearer [已隐藏]').replace(/\bbiai_[A-Za-z0-9_-]{12,}/g, '[已隐藏]');
+}
+
+async function errorResponse(response) {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      length += value.length;
+      if (length > 256 * 1024) { await reader.cancel(); return null; }
+      chunks.push(Buffer.from(value));
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch { await reader.cancel().catch(() => {}); return null; }
+  finally { reader.releaseLock(); }
+}
+
+async function jsonRequest(service, url, { headers = {}, body, timeout = 15000, frozen = false, errorDetails = false } = {}) {
   let response;
   try {
     response = await fetch(url, {
@@ -41,10 +80,12 @@ async function jsonRequest(service, url, { headers = {}, body, timeout = 15000, 
     const retryAfterHeader = response.headers.get('Retry-After');
     const retryAfter = Math.max(0, Number(retryAfterHeader) * 1000 || Date.parse(retryAfterHeader) - Date.now() || 0);
     const retryable = status === 429 || status >= 500 || status === 408;
-    await response.body?.cancel().catch(() => {});
+    const failure = errorDetails ? await errorResponse(response) : null;
+    if (!errorDetails) await response.body?.cancel().catch(() => {});
+    const original = errorDetails ? apiErrorMessage(failure, [headers.Authorization?.replace(/^Bearer /, '')]) : '';
     const detail = status === 401 || status === 403 ? '连接未通过，请检查密钥和服务权限' : status === 402 ? '额度或余额不足' :
       status === 429 ? '操作过于频繁，请稍后再试' : status === 409 ? '可能已有相同任务，请查看任务记录' : `暂时无法完成操作（错误码 ${status}）`;
-    throw new IntegrationError(`${service}：${detail}。`, retryable ? 503 : 422, {
+    throw new IntegrationError(original ? `${service}：${original}（HTTP ${status}）` : `${service}：${detail}。`, retryable ? 503 : 422, {
       retryable, retryAfter, uncertain: status === 408 || status >= 500 || status === 409
     });
   }
@@ -120,7 +161,7 @@ export function socialClient(config) {
 
 export function videoClient(config) {
   if (!config.key) throw new IntegrationError('请配置 Smart BIAI 视频生成 API Key。', 422);
-  const call = (path, body) => jsonRequest('Smart BIAI 视频', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body });
+  const call = (path, body) => jsonRequest('Smart BIAI 视频', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body, errorDetails: true });
   return {
     async models() {
       const data = (await call('/v1/models?media_type=video'))?.data;
@@ -146,7 +187,7 @@ export function videoClient(config) {
 
 export function imageClient(config) {
   if (!config.key) throw new IntegrationError('请在连接设置填写 Smart BIAI 图片与视频生成 API Key。', 422);
-  const call = (path, body) => jsonRequest('Smart BIAI 生图', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body, timeout: 45000 });
+  const call = (path, body) => jsonRequest('Smart BIAI 生图', `${videoRoot}${path}`, { headers: { Authorization: `Bearer ${config.key}` }, body, timeout: 45000, errorDetails: true });
   return {
     async models() {
       const data = (await call('/v1/models?media_type=image'))?.data;

@@ -38,6 +38,7 @@ test('a failed image can branch to another model while retaining prompt, count a
   assert.deepEqual(draft.parameters.fileIds,[h.file.id]);assert.equal(draft.files[0].id,h.file.id);
   assert.equal(draft.credits,14);assert.equal(h.quotes.length,1);assert.deepEqual(h.source,before);
   assert.deepEqual(draft.source,{kind:'image',id:h.source.id});assert.ok(result.observations.find(step=>step.tool==='prepare_generation').result.requiresConfirmation);
+  assert.ok(result.chat.findIndex(entry => entry.agent && entry.type === 'text') < result.chat.findIndex(entry => entry.type === 'image-generation' && entry.id === draft.id));
   assert.ok(h.contexts[1].observations[0].result.status==='failed');
   assert.ok(h.contexts[0].context.history.some(entry=>entry.role==='assistant'));
 });

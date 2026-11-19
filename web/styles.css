@@ -150,6 +150,11 @@ input::placeholder, textarea::placeholder { color: #777b90; }
 .quote { margin-right: auto; color: var(--muted); font-size: 13px; }
 .quote strong { font-size: 20px; color: var(--ink); }
 .form-error { font-size: 12px; color: #9c303b; background: #fff2f4; padding: 7px 9px; border-radius: 6px; }
+.generation-error { min-width: 0; max-width: 100%; }
+.error-trigger { display: flex; gap: 8px; align-items: center; width: 100%; min-width: 0; padding: 0; background: transparent; border: 0; color: inherit; text-align: left; line-height: 1.6; }
+.error-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-error.compact { width: 220px; margin-top: 6px; padding: 4px 6px; }
+.error-tooltip { position: fixed; z-index: 1000; width: max-content; max-width: min(480px, calc(100vw - 24px)); max-height: min(340px, calc(100dvh - 32px)); overflow: auto; overscroll-behavior: contain; padding: 13px 15px; border: 1px solid #e2dce8; border-radius: 9px; color: #612b37; background: #fffafb; box-shadow: 0 8px 30px #2b122b26; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .progress { position: relative; background: #eeeafa; border-radius: 20px; overflow: hidden; height: 6px; }
 .progress i { position: absolute; height: 100%; width: 35%; border-radius: 20px; background: #8274ee; animation: progress 1.4s infinite ease-in-out; }
 @keyframes progress { from { left: -35%; } to { left: 100%; } }

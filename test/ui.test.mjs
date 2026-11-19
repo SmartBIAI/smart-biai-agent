@@ -18,6 +18,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
   window.HTMLElement.prototype.scrollTo ||= function () {};
   window.normalizeGenerationIntent = normalizeGenerationIntent;
   let clock = Date.now();
+  window.Date.now = () => clock;
   const requests = [];
   const storage = new Map();
   if(agentEnabled)storage.set('ui',JSON.stringify({generations:initialGenerations||[],images:initialImages||[],publications:initialPublications||[],conversations:initialConversations||[]}));
@@ -43,7 +44,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
     .replace("import { normalizeGenerationIntent } from './generation-models.js';", '')
     .replaceAll('import.meta.url', JSON.stringify('https://example.com/agent/app.js'));
   await window.eval(`(async () => { ${source}\n })()`);
-  return { window, document: window.document, requests, advance: () => { clock += 2000; },
+  return { window, document: window.document, requests, advance: (milliseconds = 20000) => { clock += milliseconds; },
     change(element, value) { element.value = value; element.dispatchEvent(new window.Event('change', { bubbles: true })); },
     submit(form) { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
     async attach() {
@@ -352,6 +353,8 @@ test('Agent protocol restores a failed task, switches model and retains referenc
     const composer=ui.document.querySelector('#composer');composer.elements.message.value='保留前面的设置，用另一款已开通模型再试一下。';ui.submit(composer);
     await until(()=>ui.document.querySelector('[data-form="image-generation"]'),'Agent retry draft');
     const form=ui.document.querySelector('[data-form="image-generation"]');
+    const messages = [...ui.document.querySelectorAll('.message')];
+    assert.ok(messages.findIndex(item => item.textContent.includes('沿用原素材，已准备另一模型的草稿，请确认。')) < messages.findIndex(item => item.contains(form)));
     assert.equal(form.elements.model.value,'smartbiai-gpt-img-2');assert.equal(form.elements.prompt.value,image.parameters.prompt);
     assert.ok(form.textContent.includes(file.name));assert.equal(form.querySelector('button[type=submit]').textContent,'确认生成图片');
     assert.equal(ui.requests.some(request=>request.path==='images'&&request.body),false);
@@ -398,4 +401,86 @@ test('draft controls cannot be edited or confirmed while a multi-turn operation 
     await until(()=>ui.document.querySelector('[data-form="image-generation"]').elements.n.value==='2','updated draft');
     assert.equal(ui.document.querySelector('[data-form="image-generation"]').elements.prompt.disabled,false);
   }finally{release();await ui.close();}
+});
+
+test('queued image slots show progress without unavailable-link placeholders and preserve ready image indices', async () => {
+  const id = '308c1704-7a84-4d36-8355-8007b16f4811';
+  const image = { id, mode: 'mock', status: 'generating', created: Date.now(), parameters: { model: 'smartbiai-gpt-img-2', prompt: '产品场景图', n: 3 }, results: [
+    { index: 0, status: 'queued' }, { index: 1, status: 'succeeded', url: 'https://example.com/ready.png' }, { index: 2, status: 'generating' }
+  ] };
+  const conversation = { id: '4c9d4950-50a3-44a8-bcca-d867dd3d0ac2', title: '图片生成中', revision: 1, chat: [{ type: 'image-result', id }], drafts: [] };
+  const ui = await app({ agentEnabled: true, initialImages: [image], initialConversations: [conversation] });
+  try {
+    const card = ui.document.querySelector('[data-image-result]');
+    assert.ok(card.querySelector('.progress i'));
+    assert.equal(card.querySelectorAll('.image-placeholder').length, 0);
+    assert.ok(!card.textContent.includes('暂无可用链接'));
+    const ready = card.querySelector('[data-action="preview-image"]');
+    assert.equal(ready.dataset.index, '1');
+    ready.click();
+    assert.equal(ui.document.querySelector('#image-dialog img').src, 'https://example.com/ready.png');
+  } finally { await ui.close(); }
+});
+
+test('generation errors retain full safe text in chat, lists and dialogs with keyboard and click details', async () => {
+  const reason = '模型返回：<img src=x onerror=alert(1)>\n' + '请更换参考素材，再检查生成参数。'.repeat(120);
+  const videoId = '99f3f515-ed67-463d-801a-2f0ba6d151d3', imageId = '308c1704-7a84-4d36-8355-8007b16f4811';
+  const video = { id: videoId, mode: 'mock', status: 'failed', error: reason, created: Date.now(), parameters: { model: 'smartbiai-sd-2-0-mini-260619', prompt: '视频测试', duration: 6 } };
+  const image = { id: imageId, mode: 'mock', status: 'partial', error: reason, created: Date.now(), parameters: { model: 'smartbiai-gpt-img-2', prompt: '图片测试', n: 2 }, results: [{ index: 0, status: 'failed', error: '第一张校验失败' }] };
+  const conversation = { id: '4c9d4950-50a3-44a8-bcca-d867dd3d0ac2', title: '失败原因', revision: 1, chat: [{ type: 'result', id: videoId }, { type: 'image-result', id: imageId }], drafts: [] };
+  const ui = await app({ agentEnabled: true, initialImages: [image], initialGenerations: [video], initialConversations: [conversation] });
+  try {
+    const { document, window } = ui;
+    const trigger = document.querySelector('[data-result] [data-error-detail]');
+    assert.equal(trigger.querySelector('.error-summary').textContent, reason);
+    assert.equal(trigger.querySelector('img'), null);
+    trigger.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true }));
+    const tooltip = document.querySelector('#generation-error-tooltip');
+    assert.equal(tooltip.hidden, false); assert.equal(tooltip.textContent, reason); assert.equal(tooltip.querySelector('img'), null);
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(tooltip.hidden, true);
+    trigger.focus(); assert.equal(tooltip.hidden, false);
+    trigger.click(); assert.equal(tooltip.hidden, false);
+    trigger.click(); assert.equal(tooltip.hidden, true);
+    assert.ok(document.querySelector('[data-image-result]').textContent.includes('第一张校验失败'));
+    window.location.hash = '#tasks';
+    await until(() => document.querySelector('[data-tab="generation"]'), 'task tabs');
+    document.querySelector('[data-tab="generation"]').click();
+    assert.equal(document.querySelector('#task-table .error-summary').textContent, reason);
+    document.querySelector('[data-action="preview-video"]').click();
+    const dialogTrigger = document.querySelector('#video-dialog [data-error-detail]');
+    dialogTrigger.click();
+    assert.equal(tooltip.closest('dialog')?.id, 'video-dialog');
+    assert.equal(tooltip.textContent, reason);
+    document.querySelector('#video-dialog').close();
+    document.querySelector('[data-tab="image"]').click();
+    assert.equal(document.querySelector('#task-table .error-summary').textContent, reason);
+  } finally { await ui.close(); }
+});
+
+test('background image and video reads follow independent 10-second and 15-second intervals', async () => {
+  const ui = await app();
+  const count = path => ui.requests.filter(item => item.path === path && !item.body).length;
+  try {
+    const images = count('images'), videos = count('generations');
+    ui.advance(9999); await wait(1100);
+    assert.equal(count('images'), images); assert.equal(count('generations'), videos);
+    ui.advance(1); await until(() => count('images') === images + 1, '10-second image read');
+    assert.equal(count('generations'), videos);
+    ui.advance(5000); await until(() => count('generations') === videos + 1, '15-second video read');
+    assert.equal(count('images'), images + 1);
+  } finally { await ui.close(); }
+});
+
+test('historical Agent explanations display before their generation form and remain before it after a new turn', async () => {
+  const id = '308c1704-7a84-4d36-8355-8007b16f4811';
+  const conversation = { id: '4c9d4950-50a3-44a8-bcca-d867dd3d0ac2', title: '历史草稿', revision: 1,
+    chat: [{ type: 'user', text: '创作一个产品图' }, { type: 'image-generation', id }, { type: 'text', agent: true, text: '请先检查这份参数再确认。' }],
+    drafts: [{ id, kind: 'image', parameters: { model: 'smartbiai-gpt-img-2', prompt: '产品图', n: 1, size: '1024x1024', quality: 'auto' }, files: [], links: [], credits: 5 }] };
+  const ui = await app({ agentEnabled: true, initialConversations: [conversation] });
+  try {
+    const messages = [...ui.document.querySelectorAll('.message')];
+    assert.ok(messages.findIndex(item => item.textContent.includes('请先检查这份参数再确认。')) < messages.findIndex(item => item.querySelector('[data-form="image-generation"]')));
+    assert.equal(ui.requests.some(item => item.path === 'images' && item.body), false);
+  } finally { await ui.close(); }
 });

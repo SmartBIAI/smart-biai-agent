@@ -1,4 +1,4 @@
-import { imageClient, mediaUrl } from './integrations.mjs';
+import { apiErrorMessage, imageClient, mediaUrl } from './integrations.mjs';
 import { imageModels, imageParameters, validationError } from './generation-models.js';
 
 const sampleUrl = './demo-assets/sample-cover.jpg';
@@ -99,22 +99,25 @@ export function createImageJobs(database, { connection, models, prepareFiles, cl
 
   function accept(row, task) {
     if (!task || typeof task.id !== 'string' || !task.id || row.source_id && task.id !== row.source_id ||
-        task.request_id && task.request_id !== row.id || task.model && task.model !== JSON.parse(row.parameters).model || !Array.isArray(task.data)) {
+        task.request_id && task.request_id !== row.id || task.model && task.model !== JSON.parse(row.parameters).model || !Array.isArray(task.data) && task.status !== 'failed') {
       throw Object.assign(new Error('暂时无法确认图片任务结果，工作台会继续查询原任务。'), { uncertain: true });
     }
     const statuses = { succeeded: 'completed', partially_succeeded: 'partial', failed: 'failed', review: 'review' };
     const state = statuses[task.status] || 'generating';
     const n = JSON.parse(row.parameters).n;
-    const results = task.data.slice(0, n).map((item, index) => ({
+    const secrets = [connection().key];
+    const results = (Array.isArray(task.data) ? task.data : []).slice(0, n).map((item, index) => ({
       index: Number.isInteger(item.index) ? item.index : index, status: String(item.status || 'queued'), url: mediaUrl(item.url),
       urlExpiresAt: timestamp(item.url_expires_at), expiresAt: timestamp(item.expires_at), mimeType: String(item.mime_type || ''),
       width: Number.isInteger(item.width) ? item.width : null, height: Number.isInteger(item.height) ? item.height : null,
-      error: item.error ? '这张图片未能生成，请查看任务状态。' : null
+      error: apiErrorMessage(item.error, secrets) || (item.status === 'failed' ? '这张图片生成失败，接口未返回具体原因。' : null)
     }));
+    const error = apiErrorMessage(task.error, secrets) || (['failed', 'partial'].includes(state) ? results.filter(item => item.error)
+      .map(item => n === 1 ? item.error : `第 ${item.index + 1} 张：${item.error}`).join('\n') : '');
     const complete = ['completed', 'partial', 'failed'].includes(state);
     database.prepare('UPDATE image_generation SET source_id=?, state=?, results=?, updated=?, poll_at=?, error=?, charged=?, refunded=? WHERE id=?')
-      .run(task.id, state, JSON.stringify(results), now(), complete ? 0 : now() + 4500,
-        state === 'failed' ? 'Smart BIAI 未能生成图片，未交付部分的积分由服务退回。' : null,
+      .run(task.id, state, JSON.stringify(results), now(), complete ? 0 : now() + 10000,
+        error || (state === 'failed' ? '图片生成失败，接口未返回具体原因。' : null),
         amount(task.charged_credits), amount(task.refunded_credits), row.id);
     return get.get(row.id);
   }

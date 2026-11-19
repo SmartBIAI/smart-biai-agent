@@ -1,4 +1,4 @@
-import { mediaUrl, socialClient, videoClient } from './integrations.mjs';
+import { apiErrorMessage, mediaUrl, socialClient, videoClient } from './integrations.mjs';
 
 const minute = 60_000;
 const statusMap = { 10: 'queued_upstream', 20: 'publishing', 30: 'completed', 40: 'failed', 50: 'canceled' };
@@ -47,18 +47,19 @@ export function createLiveJobs(database, configuration, lateWindow) {
     if (typeof id !== 'string' || !id || task.id !== id || task.request_id && task.request_id !== row.id ||
         task.model && task.model !== JSON.parse(row.parameters).model) throw Object.assign(new Error('暂时无法确认这条视频的生成结果。'), { uncertain: true });
     const status = typeof task.status === 'string' ? task.status : '';
+    const error = apiErrorMessage(task.error, [configuration('video').key]);
     if (status === 'succeeded') {
       const url = task.file_expired ? null : mediaUrl(task.video_url);
       const cover = task.file_expired ? null : mediaUrl(task.last_frame_url) || mediaUrl(task.cover_url);
       const expires = timestamp(task.file_expires_at);
       const linkExpires = timestamp(task.video_url_expires_at ?? task.url_expires_at ?? task.download_url_expires_at) ?? (url ? Date.now() + 10 * minute : null);
       const state = url ? 'completed' : task.file_expired ? 'expired' : 'generating';
-      saveVideo(row, state, state === 'generating' ? Date.now() + 10_000 : 0, state === 'generating' ? '视频完成，等待可用的预览地址。' : null,
+      saveVideo(row, state, state === 'generating' ? Date.now() + 15_000 : 0, state === 'generating' ? '视频完成，等待可用的预览地址。' : null,
         { id, status, url, cover, expires, linkExpires });
     } else if (status === 'failed') {
-      saveVideo(row, 'failed', 0, 'Smart BIAI 未能生成视频。', { id, status });
+      saveVideo(row, 'failed', 0, error || '视频生成失败，接口未返回具体原因。', { id, status });
     } else {
-      saveVideo(row, status === 'review' ? 'review' : 'generating', Date.now() + (status === 'review' ? minute : 4500), null, { id, status });
+      saveVideo(row, status === 'review' ? 'review' : 'generating', Date.now() + (status === 'review' ? minute : 15000), error || null, { id, status });
     }
     return getVideo.get(row.id);
   }

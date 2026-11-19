@@ -16,6 +16,7 @@ const icons = {
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   search: '<circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/>',
   link: '<path d="M13 11a3 3 0 0 0-4.5 0l-3 3a3 3 0 1 0 4 4l1.5-1.5m0-3a3 3 0 0 0 4.5 0l3-3a3 3 0 1 0-4-4L13 8"/>'
 };
 
@@ -46,6 +47,7 @@ const state = {
   history: [], conversation: null, historyBusy: false
 };
 const modeSelect = document.querySelector('#run-mode');
+const generationPolls = new Map();
 let conversationDirty = false;
 let conversationTimer;
 let conversationSave = Promise.resolve(true);
@@ -64,6 +66,81 @@ function setAgentPending(pending) {
 function esc(value = '') {
   return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 }
+
+function errorContent(message) {
+  return `<button type="button" class="error-trigger" data-error-detail aria-label="查看完整错误信息"><span class="error-summary">${esc(message)}</span>${icon('info', 15)}</button>`;
+}
+
+function generationError(message, compact = false) {
+  return message ? `<p class="form-error generation-error${compact ? ' compact' : ''}">${errorContent(message)}</p>` : '';
+}
+
+const errorTooltip = document.createElement('div');
+errorTooltip.id = 'generation-error-tooltip';
+errorTooltip.className = 'error-tooltip';
+errorTooltip.setAttribute('role', 'tooltip');
+errorTooltip.tabIndex = 0;
+errorTooltip.hidden = true;
+document.body.append(errorTooltip);
+let errorTrigger = null;
+let errorPinned = false;
+let errorHideTimer;
+
+function hideErrorDetails() {
+  clearTimeout(errorHideTimer);
+  errorTrigger?.removeAttribute('aria-describedby');
+  errorTrigger?.setAttribute('aria-expanded', 'false');
+  errorTrigger = null;
+  errorPinned = false;
+  errorTooltip.hidden = true;
+}
+
+function showErrorDetails(trigger, pinned = false) {
+  hideErrorDetails();
+  errorTrigger = trigger;
+  errorPinned = pinned;
+  const container = trigger.closest('dialog[open]') || document.body;
+  if (errorTooltip.parentElement !== container) container.append(errorTooltip);
+  errorTooltip.textContent = trigger.querySelector('.error-summary').textContent;
+  errorTooltip.hidden = false;
+  trigger.setAttribute('aria-describedby', errorTooltip.id);
+  trigger.setAttribute('aria-expanded', 'true');
+  const rect = trigger.getBoundingClientRect();
+  const { width, height } = errorTooltip.getBoundingClientRect();
+  errorTooltip.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`;
+  const below = innerHeight - rect.bottom - 20;
+  const top = below < height && rect.top > height + 20 ? rect.top - height - 8 : rect.bottom + 8;
+  errorTooltip.style.top = `${Math.max(12, Math.min(top, innerHeight - height - 12))}px`;
+}
+
+function deferHideError() {
+  clearTimeout(errorHideTimer);
+  if (!errorPinned) errorHideTimer = setTimeout(hideErrorDetails, 150);
+}
+
+document.addEventListener('mouseover', event => {
+  const trigger = event.target.closest?.('[data-error-detail]');
+  if (trigger && trigger !== errorTrigger) showErrorDetails(trigger);
+  if (trigger || errorTooltip.contains(event.target)) clearTimeout(errorHideTimer);
+});
+document.addEventListener('mouseout', event => {
+  if (event.target.closest?.('[data-error-detail]') || errorTooltip.contains(event.target)) deferHideError();
+});
+document.addEventListener('focusin', event => {
+  if (event.target.matches?.('[data-error-detail]')) showErrorDetails(event.target);
+  if (errorTooltip.contains(event.target)) clearTimeout(errorHideTimer);
+});
+document.addEventListener('focusout', event => {
+  if (event.target.matches?.('[data-error-detail]') || errorTooltip.contains(event.target)) deferHideError();
+});
+document.addEventListener('click', event => {
+  const trigger = event.target.closest?.('[data-error-detail]');
+  if (trigger) { if (trigger === errorTrigger && errorPinned) hideErrorDetails(); else showErrorDetails(trigger, true); }
+  else if (!errorTooltip.contains(event.target)) hideErrorDetails();
+});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') hideErrorDetails(); });
+document.addEventListener('scroll', event => { if (!errorTooltip.contains(event.target)) hideErrorDetails(); }, true);
+window.addEventListener('resize', hideErrorDetails);
 
 function selected(option, value) { return option === value ? ' selected' : ''; }
 function findAccount(id) { return state.accounts.find(account => account.id === id); }
@@ -358,6 +435,21 @@ async function uploadAttachments(input) {
   } finally { state.uploadBusy = false; }
 }
 
+function chatForDisplay() {
+  const result = [];
+  let turn = [];
+  const append = () => {
+    const first = turn.findIndex(entry => ['generation', 'image-generation'].includes(entry.type));
+    const notes = first < 0 ? [] : turn.slice(first + 1).filter(entry => entry.type === 'text' && entry.agent && !entry.accounts && !entry.targets);
+    if (notes.length) result.push(...turn.slice(0, first), ...notes, ...turn.slice(first).filter(entry => !notes.includes(entry)));
+    else result.push(...turn);
+    turn = [];
+  };
+  for (const entry of state.chat) { if (entry.type === 'user') append(); turn.push(entry); }
+  append();
+  return result;
+}
+
 function renderChat() {
   const box = document.querySelector('#chat-scroll');
   if (!box) return;
@@ -365,7 +457,7 @@ function renderChat() {
     box.innerHTML = `<div class="welcome"><div class="agent-symbol">${icon('agent', 30)}</div><h2>今天想做什么？</h2><p>从查找账号到确认发布，在同一个对话里完成。</p><div class="prompt-grid">${prompts.map(([symbol, title, detail, message]) => `<button class="prompt" data-action="prompt" data-message="${esc(message)}"><span class="prompt-icon">${icon(symbol)}</span><strong>${title}</strong><small>${detail}</small>${icon('arrow', 16)}</button>`).join('')}</div>${recentVideos()}</div>`;
     return;
   }
-  box.innerHTML = state.chat.map(entry => {
+  box.innerHTML = chatForDisplay().map(entry => {
     if (entry.type === 'user') return `<div class="message user"><div class="bubble">${esc(entry.text)}${attachmentList(entry.files)}</div><div class="avatar user-avatar">${icon('accounts', 17)}</div></div>`;
     if (entry.type === 'generation') return assistant(renderGenerationDraft(state.drafts.get(entry.id)));
     if (entry.type === 'result') return assistant(resultCard(entry.id, entry.intent));
@@ -454,13 +546,17 @@ function renderImageDraft(draft) {
 function imageResultCard(id) {
   const task = findImage(id);
   if (!task) return '<p>正在读取图片结果…</p>';
+  const active = ['queued', 'submitting', 'generating', 'unknown', 'review'].includes(task.status);
+  const results = task.results.map((item, index) => ({ item, index })).filter(({ item }) => !active || item.url || ['failed', 'expired'].includes(item.status));
   return `<div class="inner-card image-result-card" data-image-result="${id}"><div class="card-header"><span class="card-icon">${icon('image')}</span><div><h3>图片生成结果</h3><p>${esc(imageModelName(task))} · ${task.parameters.n} 张</p></div>${imageBadge(task)}</div>
     <p class="field-note">${esc(task.parameters.prompt.slice(0, 180))}</p>
-    ${task.results.length ? `<div class="image-results">${task.results.map((item, index) => `<div class="image-result-item">${item.url ? `<button type="button" class="image-preview-button" data-action="preview-image" data-id="${id}" data-index="${index}" aria-label="预览第 ${index + 1} 张图片"><img src="${esc(item.url)}" alt="${esc(task.parameters.prompt.slice(0, 100))}" loading="lazy"></button>` : `<div class="image-placeholder">${icon('image', 26)}<span>${item.status === 'failed' ? '这张图片未完成' : item.status === 'expired' ? '图片已过期' : '暂无可用链接'}</span></div>`}
+    ${active ? '<div class="progress" role="status" aria-label="图片生成处理中"><i></i></div>' : ''}
+    ${results.length ? `<div class="image-results">${results.map(({ item, index }) => `<div class="image-result-item">${item.url ? `<button type="button" class="image-preview-button" data-action="preview-image" data-id="${id}" data-index="${index}" aria-label="预览第 ${index + 1} 张图片"><img src="${esc(item.url)}" alt="${esc(task.parameters.prompt.slice(0, 100))}" loading="lazy"></button>` : `<div class="image-placeholder">${icon('image', 26)}<span>${item.status === 'failed' || task.status === 'failed' ? '这张图片未完成' : item.status === 'expired' ? '图片已过期' : '暂无可用链接'}</span></div>`}
     <small>第 ${index + 1} 张${task.mode === 'mock' ? ' · 示例图片' : item.width && item.height ? ` · ${item.width} × ${item.height}` : ''}</small>
-    ${item.url ? `<button class="text-button" type="button" data-action="preview-image" data-id="${id}" data-index="${index}">查看大图</button>` : ''}</div>`).join('')}</div>` : ['queued', 'submitting', 'generating', 'unknown', 'review'].includes(task.status) ? '<div class="progress"><i></i></div>' : ''}
-    ${task.error ? `<p class="form-error">${esc(task.error)}</p>` : ''}
-    ${task.mode === 'live' ? `<div class="card-actions"><span class="muted">${task.chargedCredits ? `已结算 ${esc(task.chargedCredits)} 积分` : ''}${task.refundedCredits ? ` · 已退回 ${esc(task.refundedCredits)} 积分` : ''}</span>${['completed', 'partial', 'expired'].includes(task.status) ? `<button class="button" data-action="refresh-image" data-id="${id}">刷新图片链接</button>` : ''}</div>` : ''}${agentRetryButton('image',id,task.status)}</div>`;
+    ${item.error && item.error !== task.error ? generationError(item.error) : ''}
+    ${item.url ? `<button class="text-button" type="button" data-action="preview-image" data-id="${id}" data-index="${index}">查看大图</button>` : ''}</div>`).join('')}</div>` : ''}
+    ${generationError(task.error)}
+    ${task.mode === 'live' ? `<div class="card-actions"><span class="muted">${task.chargedCredits ? `已结算 ${esc(task.chargedCredits)} 积分` : ''}${task.refundedCredits ? ` · 已退回 ${esc(task.refundedCredits)} 积分` : ''}</span>${['completed', 'partial', 'expired'].includes(task.status) || task.status === 'failed' && task.sourceTaskId ? `<button class="button" data-action="refresh-image" data-id="${id}">${task.status === 'failed' ? '刷新状态' : '刷新图片链接'}</button>` : ''}</div>` : ''}${agentRetryButton('image',id,task.status)}</div>`;
 }
 
 function renderImageDialog(id, index) {
@@ -515,7 +611,8 @@ function resultCard(id, intent = {}) {
   if (!video) return `<p>正在读取视频结果…</p>`;
   return `<div class="inner-card result-card" data-result="${id}"><div class="card-header"><span class="card-icon">${icon('video')}</span><div><h3>生成结果</h3><p>${esc(video.parameters.prompt.slice(0, 78))}</p></div>${generationBadge(video)}</div>
     ${video.url ? videoPreview(video) : ['generating', 'queued', 'submitting'].includes(video.status) ? '<div class="progress"><i></i></div>' : ''}
-    ${video.error ? `<p class="field-note">${esc(video.error)}</p>` : ''}
+    ${generationError(video.error)}
+    ${video.mode === 'live' && video.status === 'failed' && video.sourceTaskId ? `<div class="card-actions"><button class="button" data-action="refresh-video" data-id="${id}">刷新状态</button></div>` : ''}
     ${video.status === 'completed' ? `<div class="card-actions"><span class="muted">视频可用至 ${dateFormat(video.expiresAt)}</span>${state.mode === 'live' ? `<button class="button" data-action="refresh-video" data-id="${id}">刷新链接</button>` : ''}<button class="button primary" data-action="draft-publish" data-id="${id}">${intent.publish ? '继续准备发布' : '准备发布'} ${icon('arrow', 15)}</button></div>` : ''}${agentRetryButton('video',id,video.status)}</div>`;
 }
 
@@ -712,12 +809,12 @@ function updateTasks({ reset = false } = {}) {
   const visible = rows.slice(0, state.taskRows);
   if (state.taskTab === 'image') {
     detail.hidden = true;
-    renderTaskTable(rows.length ? `<table><thead><tr><th>图片任务</th><th>生成模型</th><th>张数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(task => `<tr><td><div class="task-work">${thumbnail(task.results.find(item => item.url)?.url)}<strong>${esc(task.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(imageModelName(task))}</td><td>${task.parameters.n}</td><td>${dateFormat(task.created)}</td><td>${imageBadge(task)}</td><td><button class="text-button" data-action="open-image-result" data-id="${esc(task.id)}">查看图片</button></td></tr>`).join('')}</tbody></table>` : empty('还没有图片生成记录', '在 BIAI Agent 描述你想生成的图片。', 'image'), visible.length, rows.length, reset);
+    renderTaskTable(rows.length ? `<table><thead><tr><th>图片任务</th><th>生成模型</th><th>张数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(task => `<tr><td><div class="task-work">${thumbnail(task.results.find(item => item.url)?.url)}<strong>${esc(task.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(imageModelName(task))}</td><td>${task.parameters.n}</td><td>${dateFormat(task.created)}</td><td>${imageBadge(task)}${generationError(task.error || task.results.find(item => item.error)?.error, true)}</td><td><button class="text-button" data-action="open-image-result" data-id="${esc(task.id)}">查看图片</button></td></tr>`).join('')}</tbody></table>` : empty('还没有图片生成记录', '在 BIAI Agent 描述你想生成的图片。', 'image'), visible.length, rows.length, reset);
     return;
   }
   if (state.taskTab === 'generation') {
     detail.hidden = true;
-    renderTaskTable(rows.length ? `<table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${durationLabel(video.parameters.duration)}</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}</td><td><button class="text-button" data-action="preview-video" data-id="${esc(video.id)}">查看视频</button></td></tr>`).join('')}</tbody></table>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video'), visible.length, rows.length, reset);
+    renderTaskTable(rows.length ? `<table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${durationLabel(video.parameters.duration)}</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}${generationError(video.error, true)}</td><td><button class="text-button" data-action="preview-video" data-id="${esc(video.id)}">查看视频</button></td></tr>`).join('')}</tbody></table>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video'), visible.length, rows.length, reset);
     return;
   }
   renderTaskTable(rows.length ? `<table><thead><tr><th>作品</th><th>目标账号</th><th>预约时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(item => {
@@ -871,6 +968,7 @@ async function sendMessage(message, { mediaType, referenceFiles, understood, cho
       state.drafts.set(id, { id, kind: 'image', parameters: { model: model.id, prompt: intent.prompt || value, n: intent.n || 1,
         ...(model.spec === 'size' ? { size: model.sizes[0], quality: model.qualities[0] } : { ratio: model.ratios.includes(intent.ratio) ? intent.ratio : model.ratios[0], resolution: model.resolutions[0] }) },
         links: [], files, intent });
+      textEntry(intent.message || '已准备创作参数，请检查提示词、模型和附件，再获取报价并确认生成。');
       chat.push({ type: 'image-generation', id });
     }
     if (intent.generate) {
@@ -883,6 +981,7 @@ async function sendMessage(message, { mediaType, referenceFiles, understood, cho
       const duration = intent.duration === -1 && model.autoDuration ? -1 : model.durations?.length && !model.durations.includes(seconds) ? model.durations[0] : seconds;
       const resolution = model.resolutions.includes('720p') ? '720p' : model.resolutions[0];
       state.drafts.set(id, { id, parameters: { prompt, model: model.id, ratio, resolution, duration, audio: false }, links: [], files, intent });
+      textEntry(intent.message || '已准备创作参数，请检查提示词、模型和附件，再获取报价并确认生成。');
       chat.push({ type: 'generation', id });
     } else if (intent.imageQuery) {
       state.images = await request('images');
@@ -1004,7 +1103,10 @@ function changeDraft(form, target) {
 
 function setFormError(form, message = '') {
   const field = form.querySelector('.form-error');
-  field.textContent = message;
+  const generation = ['generation', 'image-generation'].includes(form.dataset.form);
+  if (generation) field.innerHTML = message ? errorContent(message) : '';
+  else field.textContent = message;
+  field.classList.toggle('generation-error', generation && Boolean(message));
   field.hidden = !message;
 }
 
@@ -1030,6 +1132,7 @@ async function submitForm(form, clearSecret = false) {
       } else {
         const image = await request('images', { ...parameters, id: draft.id, credits: draft.credits });
         upsert(state.images, image);
+        generationPolls.set(`${state.mode}:image`, Date.now());
         const index = state.chat.findIndex(entry => entry.id === draft.id && entry.type === 'image-generation');
         if (index >= 0) state.chat[index] = { type: 'image-result', id: image.id };
         state.drafts.delete(draft.id);
@@ -1044,6 +1147,7 @@ async function submitForm(form, clearSecret = false) {
       } else {
         const video = await request('generations', { ...parameters, id: draft.id, credits: draft.credits });
         upsert(state.generations, video);
+        generationPolls.set(`${state.mode}:video`, Date.now());
         const index = state.chat.findIndex(entry => entry.id === draft.id && entry.type === 'generation');
         if (index >= 0) state.chat[index] = { type: 'result', id: video.id, intent: draft.intent };
         state.drafts.delete(draft.id);
@@ -1140,8 +1244,8 @@ function renderVideoDialog(video) {
   if (activeUrl && activeUrl === video.url) return;
   videoDialog.innerHTML = `<div class="detail-title"><h2 id="video-dialog-title">视频预览</h2><form method="dialog"><button class="icon-button" aria-label="关闭视频预览" autofocus>${icon('close')}</button></form></div>
     <div class="video-dialog-info"><span>${esc(modelName(video))} · ${durationLabel(video.parameters.duration)}</span>${generationBadge(video)}</div>
-    ${video.url ? videoPreview(video) : `<p class="empty-note">${esc(video.error || (video.status === 'completed' ? '视频链接已失效，请刷新链接。' : '当前暂无可播放的视频。'))}</p>`}
-    ${video.mode === 'live' && video.status === 'completed' ? `<button type="button" class="button" data-refresh-preview>刷新链接</button>` : ''}`;
+    ${video.url ? videoPreview(video) : video.error ? generationError(video.error) : `<p class="empty-note">${video.status === 'completed' ? '视频链接已失效，请刷新链接。' : '当前暂无可播放的视频。'}</p>`}
+    ${video.mode === 'live' && (video.status === 'completed' || video.status === 'failed' && video.sourceTaskId) ? `<button type="button" class="button" data-refresh-preview>${video.status === 'failed' ? '刷新状态' : '刷新链接'}</button>` : ''}`;
 }
 
 async function refreshDialogVideo() {
@@ -1328,10 +1432,20 @@ main.addEventListener('click', async event => {
   }
 });
 
-async function sync() {
+async function sync({ poll = false } = {}) {
   const mode = state.mode;
-  const [generations, publications, images] = await Promise.all([request('generations', undefined, mode), request('publications', undefined, mode), request('images', undefined, mode)]);
+  const now = Date.now();
+  const readVideo = !poll || now - (generationPolls.get(`${mode}:video`) ?? -Infinity) >= 15000;
+  const readImage = !poll || now - (generationPolls.get(`${mode}:image`) ?? -Infinity) >= 10000;
+  if (readVideo) generationPolls.set(`${mode}:video`, now);
+  if (readImage) generationPolls.set(`${mode}:image`, now);
+  const [nextVideos, publications, nextImages] = await Promise.all([
+    readVideo ? request('generations', undefined, mode) : null, request('publications', undefined, mode),
+    readImage ? request('images', undefined, mode) : null
+  ]);
   if (mode !== state.mode) return;
+  const generations = nextVideos ?? state.generations;
+  const images = nextImages ?? state.images;
   const videoChanges = generations.filter(next => {
     const prior = findVideo(next.id);
     return !prior || prior.status !== next.status || prior.url !== next.url || prior.error !== next.error;
@@ -1359,6 +1473,7 @@ async function sync() {
   if (state.page === 'agent' && imageChanges.length) {
     for (const task of imageChanges) for (const card of main.querySelectorAll(`[data-image-result="${task.id}"]`)) card.outerHTML = imageResultCard(task.id);
   }
+  if (errorTrigger && !errorTrigger.isConnected) hideErrorDetails();
 }
 
 window.addEventListener('hashchange', navigate);
@@ -1426,7 +1541,7 @@ window.addEventListener('pageshow', event => { if (event.persisted) void request
 
 await loadMode();
 const poll = async () => {
-  if (state.loaded) try { await sync(); } catch { /* The next poll will reconnect to the local server. */ }
+  if (state.loaded) try { await sync({ poll: true }); } catch { /* The next poll will reconnect to the local server. */ }
   setTimeout(poll, 1000);
 };
 setTimeout(poll, 1000);

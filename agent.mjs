@@ -367,7 +367,9 @@ export async function runConversationAgent(input, dependencies) {
     }
   }
   if (!finalText) finalText = changed.size ? '草稿已准备，请检查下方的参数、附件和报价，确认后再生成或发布。' : timedOut ? '本轮处理时间较长，已保留查询记录。请继续说明要处理的对象或要求。' : '还需要补充信息才能继续，请明确要操作的记录和希望修改的内容。';
-  chat.push({type:'text',text:finalText,agent:true});
+  const turnStart = chat.findLastIndex(entry => entry.type === 'user') + 1;
+  const firstGeneration = chat.findIndex((entry, index) => index >= turnStart && ['generation', 'image-generation'].includes(entry.type) && changed.has(entry.id));
+  chat.splice(firstGeneration < 0 ? chat.length : firstGeneration, 0, {type:'text',text:finalText,agent:true});
   return {protocol:agentProtocol,chat,drafts:[...drafts.values()],changedIds:[...changed],memory:nextMemory,observations,notes,
     updates:{...Object.fromEntries(Object.entries(touched).map(([kind,items])=>[kind,[...items.values()]])),
       ...(catalogs.has('image')?{imageModels:catalogs.get('image')}:{}),...(catalogs.has('video')?{models:catalogs.get('video')}:{})},message:finalText};

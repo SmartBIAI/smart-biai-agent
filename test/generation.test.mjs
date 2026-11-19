@@ -163,7 +163,9 @@ test('image generation requires a matching confirmed quote and is idempotent', a
     assert.equal(h.calls.create.length, 1);
     assert.equal(h.calls.create[0].request_id, body.id);
     assert.equal(h.calls.create[0].max_credits, quote.credits);
-    h.tick(5000); await h.jobs.run();
+    h.tick(9999); await h.jobs.run();
+    assert.equal(h.calls.detail.length, 0);
+    h.tick(1); await h.jobs.run();
     const completed = h.jobs.get(body.id, 'live');
     assert.equal(completed.status, 'completed');
     assert.equal(completed.results.length, 2);
@@ -212,7 +214,7 @@ test('image expiry, partial delivery and credentials remain separate concerns', 
       { index: 0, status: 'succeeded', url: 'https://example.com/one.png', expires_at: new Date(Date.UTC(2026, 10, 19)).toISOString(), url_expires_at: new Date(Date.UTC(2026, 10, 18, 1)).toISOString() },
       { index: 1, status: 'failed', error: { code: 'generation_failed' } }
     ] });
-    h.tick(5000); await h.jobs.run();
+    h.tick(10000); await h.jobs.run();
     assert.equal(h.jobs.get(body.id, 'live').status, 'partial');
     assert.equal(h.jobs.get(body.id, 'live').refundedCredits, 5);
     h.tick(3600000);
@@ -233,5 +235,31 @@ test('mock image tasks store metadata and survive reopening the job manager', as
     const reopened = createImageJobs(h.db, { connection: () => ({}), models: async () => [], prepareFiles: async () => [], now: () => Date.UTC(2026, 10, 18, 0, 0, 2) });
     assert.equal(reopened.list('mock')[0].id, body.id);
     assert.ok(reopened.list('mock')[0].results[0].url.startsWith('./demo-assets/'));
+  } finally { h.db.close(); }
+});
+
+test('image failures preserve task and per-image API reasons, including partial delivery', async () => {
+  const reason = '参考图未通过校验：请更换素材。\n' + 'provider diagnostic '.repeat(250);
+  const h = harness();
+  try {
+    const body = imageBody(); const q = await h.jobs.quote(body, 'live');
+    await h.jobs.create({ ...body, credits: q.credits }, 'live'); await h.jobs.run();
+    h.upstream.detail = async id => ({ id, status: 'partially_succeeded', charged_credits: 5, refunded_credits: 5, data: [
+      { index: 0, status: 'succeeded', url: 'https://example.com/one.png' },
+      { index: 1, status: 'failed', error: { code: 'reference_rejected', message: reason } }
+    ] });
+    h.tick(10000); await h.jobs.run();
+    const partial = h.jobs.get(body.id, 'live');
+    assert.equal(partial.status, 'partial');
+    assert.ok(partial.results[1].error.includes(reason));
+    assert.ok(partial.error.includes('第 2 张：'));
+    assert.ok(partial.error.includes('reference_rejected'));
+    assert.equal(partial.refundedCredits, 5);
+    h.upstream.detail = async id => ({ id, status: 'failed', error: { code: 'upstream_failed', message: reason } });
+    const failed = await h.jobs.refresh(body.id, 'live');
+    assert.equal(failed.status, 'failed');
+    assert.ok(failed.error.includes(reason));
+    assert.ok(failed.error.includes('upstream_failed'));
+    assert.equal(h.calls.create.length, 1);
   } finally { h.db.close(); }
 });
