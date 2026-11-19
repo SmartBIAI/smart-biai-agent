@@ -81,6 +81,7 @@
 | TikTok | 支持 | 支持 | 支持 |
 | YouTube | 支持 | 支持 | 支持 |
 | Instagram | 支持 | 支持 | 支持 |
+| Facebook | 支持 | 支持 | 支持 |
 
 使用前需在 [Smart BIAI](https://www.biaibiai.com/) 完成账号接入与授权，并取得对应 API 权限。具体可发布范围取决于账号权限、服务有效期和平台要求；平台差异以发布表单及接口校验为准。
 
