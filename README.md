@@ -2,7 +2,7 @@
 
 基于 **Smart BIAI OpenAPI** 的开源 AI 创作与海外社媒工作台。部署在自己的电脑或服务器上，通过对话查询社媒账号、生成图片和视频、准备发布文案，并在确认后立即或定时发布视频作品。
 
-[在线体验](https://developer.biaibiai.com/smart-biai-agent-static/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [社媒运营 API 文档](https://developer.biaibiai.com/docs/SmartBIAI海外社媒运营开放接口文档.md) · [图片与视频生成 API](https://developer.biaibiai.com/docs) · [版本说明](CHANGELOG.md)
+[在线体验](https://developer.biaibiai.com/smart-biai-agent-static/) · [Smart BIAI 官网](https://www.biaibiai.com/) · [社媒运营 API 文档](https://developer.biaibiai.com/global-social-docs) · [图片与视频生成 API](https://developer.biaibiai.com/docs) · [版本说明](CHANGELOG.md)
 
 在线体验使用模拟数据，无需 API 密钥，记录保存在当前浏览器。自托管工作台支持模拟和真实两种模式，填写自己的 API 凭证即可连接真实服务。
 
@@ -84,7 +84,7 @@
 
 使用前需在 [Smart BIAI](https://www.biaibiai.com/) 完成账号接入与授权，并取得对应 API 权限。具体可发布范围取决于账号权限、服务有效期和平台要求；平台差异以发布表单及接口校验为准。
 
-认证、平台与授权状态编码、素材与标签、批量发布、幂等重试及任务查询，见 [社媒运营 API 文档](https://developer.biaibiai.com/docs/SmartBIAI海外社媒运营开放接口文档.md)。也可查看 [仓库内 Markdown 副本](doc/SmartBIAI海外社媒运营开放接口文档.md)。
+认证、平台与授权状态编码、素材与标签、批量发布、幂等重试及任务查询，见 [社媒运营 API 文档](https://developer.biaibiai.com/global-social-docs)。仓库内提供 [HTML 文件](doc/global-social-docs.html) 与 [Markdown 源码](doc/SmartBIAI海外社媒运营开放接口文档.md)。
 
 账号详情中的作品列表展示**通过本应用记录的发布作品**，目前不提供平台全量历史作品同步、粉丝与播放数据分析。图片生成已支持，图片直接发布到社媒暂未接入。
 

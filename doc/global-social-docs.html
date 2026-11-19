@@ -1,0 +1,1224 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#5142df"><title>Smart BIAI 海外社媒运营开放接口文档</title><meta name="description" content="Smart BIAI 海外社媒运营 API 文档：账号查询、视频素材与标签、TikTok、YouTube、Instagram 视频发布、幂等重试及任务状态查询。"><link rel="canonical" href="https://developer.biaibiai.com/global-social-docs"><style>:root { color-scheme: light; font: 15px -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif; color: #29293d; background: #fff; --purple: #5142df; --line: #e8e8f0; --muted: #72758a; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 100px; }
+body { margin: 0; }
+a { color: #5142ce; text-decoration: none; text-underline-offset: 3px; }
+a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid #b9affb; outline-offset: 4px; border-radius: 4px; }
+button { font: inherit; cursor: pointer; }
+svg { width: 17px; height: 17px; flex-shrink: 0; vertical-align: middle; }
+.skip-link { position: fixed; top: -80px; left: 12px; z-index: 100; padding: 12px 18px; color: white; background: var(--purple); border-radius: 6px; }
+.skip-link:focus { top: 8px; }
+.site-header { height: 68px; position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--line); background: #ffffffed; backdrop-filter: blur(12px); }
+.header-inner { max-width: 1320px; height: 100%; margin: auto; padding: 0 34px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.brand { display: inline-flex; gap: 10px; align-items: center; color: #24243b; font-weight: 750; font-size: 18px; letter-spacing: -.4px; white-space: nowrap; }
+.brand:hover { text-decoration: none; }
+.brand-mark { width: 33px; height: 33px; display: grid; place-items: center; border-radius: 10px; color: white; background: var(--purple); box-shadow: 0 4px 12px #5142df26; font-size: 22px; }
+.brand small { font-size: 11px; font-weight: 500; letter-spacing: 0; color: #85839b; border-left: 1px solid #dedce9; padding-left: 12px; margin-left: 3px; }
+.header-links { display: flex; gap: 23px; align-items: center; font-size: 12px; color: #656577; }
+.header-links > a { color: inherit; white-space: nowrap; }
+.header-links .header-cta { color: var(--purple); background: #f0edff; border: 1px solid #e7e1ff; border-radius: 7px; padding: 8px 12px; font-weight: 600; }
+.doc-shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); column-gap: 58px; max-width: 1280px; margin: 0 auto; padding: 36px 34px 0; align-items: start; }
+.sidebar { position: sticky; top: 96px; max-height: calc(100dvh - 118px); overflow-y: auto; padding-right: 16px; padding-bottom: 12px; scrollbar-width: thin; scrollbar-color: #dedbea transparent; }
+.sidebar-label { font-size: 10px; color: #9994b0; letter-spacing: 1.8px; font-weight: 650; padding: 1px 11px 16px; }
+.doc-nav { display: grid; gap: 4px; }
+.doc-nav a { display: flex; gap: 10px; align-items: baseline; color: #626174; padding: 9px 11px; font-size: 13px; line-height: 1.6; border-radius: 7px; border-left: 2px solid transparent; }
+.doc-nav a:hover { background: #f7f5ff; color: var(--purple); text-decoration: none; }
+.doc-nav a[aria-current=true] { color: #4b3ac3; background: #f0ecff; border-left-color: #7663e6; font-weight: 650; }
+.nav-number { width: 18px; flex-shrink: 0; color: #a49bbd; font-size: 10px; font-weight: 650; }
+.connection-card { border: 1px solid #e9e5f2; border-radius: 10px; background: #faf9fe; padding: 15px 13px; margin: 27px 0 12px 11px; }
+.connection-card span { display: block; font-size: 10px; font-weight: 650; color: #8c839f; letter-spacing: 1px; }
+.connection-card code { display: block; font-size: 10px; line-height: 1.8; color: #605879; margin: 8px 0 11px; overflow-wrap: anywhere; }
+.connection-card a { font-size: 11px; font-weight: 650; }
+.sidebar-footer { padding: 8px 11px; color: #aaa5b7; font-size: 10px; line-height: 1.7; }
+.doc-main { min-width: 0; padding: 1px 0 48px; max-width: 900px; }
+.eyebrow { color: #8979c6; letter-spacing: 2px; font-size: 10px; font-weight: 650; margin: 0 0 15px; }
+.article { font-size: 14px; line-height: 1.9; overflow-wrap: anywhere; }
+.article h1 { font-size: clamp(25px, 2.5vw, 34px); line-height: 1.45; letter-spacing: -.8px; color: #202034; font-weight: 750; margin: 0 0 14px; }
+.article h2 { font-size: 23px; line-height: 1.5; color: #262539; margin: 47px 0 22px; padding-top: 27px; border-top: 1px solid var(--line); letter-spacing: -.4px; }
+.article h3 { font-size: 17px; line-height: 1.7; margin: 30px 0 14px; color: #323047; }
+.article h4 { margin: 25px 0 11px; color: #545069; font-size: 13px; }
+.article p { margin: 13px 0; }
+.article ul, .article ol { margin: 13px 0; padding-left: 23px; }
+.article li { padding-left: 3px; margin-bottom: 7px; }
+.article strong { color: #353047; font-weight: 650; }
+.article > .doc-meta { margin: 0 0 16px; color: var(--muted); font-size: 11px; }
+.article > .resource-links { color: #b3aebe; line-height: 2.1; font-size: 11px; }
+.resource-links a { color: #7c6d9c; }
+.article > .public-address { padding: 11px 14px; margin-top: 17px; color: #81758f; background: #f8f6fe; border: 1px solid #eeebf7; border-radius: 8px; font-size: 11px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: .9em; }
+.article :not(pre) > code { padding: 2px 5px; border: 1px solid #eeebf6; border-radius: 4px; color: #68518e; background: #f8f6fc; overflow-wrap: anywhere; }
+.endpoint { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 10px; padding: 15px 16px; border: 1px solid #e8e3f5; border-radius: 9px; background: #faf9fe; }
+.article .endpoint code { background: transparent; border: 0; color: #423459; padding: 0; font-size: 13px; }
+.method { display: inline-block; border-radius: 5px; padding: 2px 7px; font: 650 10px/1.8 ui-monospace, Consolas, monospace; letter-spacing: .3px; white-space: nowrap; vertical-align: middle; }
+.method.get { color: #177b68; background: #e6f7f0; }
+.method.post { color: #6a48bd; background: #eee9fc; }
+.table-scroll { width: 100%; overflow-x: auto; border: 1px solid #e5e5ed; border-radius: 9px; margin: 18px 0 22px; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #ccc6dc transparent; }
+.article table { width: 100%; min-width: 540px; border-collapse: collapse; text-align: left; font-size: 12px; line-height: 1.8; }
+.article th { background: #f7f7fb; font-weight: 600; font-size: 11px; color: #696579; padding: 11px 13px; border-bottom: 1px solid #e7e5ed; white-space: nowrap; }
+.article td { padding: 11px 13px; border-bottom: 1px solid #efedf3; vertical-align: top; }
+.article tbody tr:last-child td { border-bottom: 0; }
+.article tbody tr:hover { background: #fcfbff; }
+.article td:first-child { min-width: 80px; }
+.article td code { font-size: 11px; }
+.code-block { overflow: hidden; margin: 18px 0 23px; border: 1px solid #e2e1ed; border-radius: 9px; background: #242334; }
+.code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 35px; padding: 6px 13px; background: #2e2c40; border-bottom: 1px solid #ffffff0b; }
+.code-language { color: #b5accd; letter-spacing: 1px; font-size: 9px; font-weight: 650; }
+.copy-button { display: none; align-items: center; gap: 5px; border: 0; border-radius: 4px; color: #c9c1dc; background: transparent; font-size: 10px; padding: 3px 6px; }
+.js .copy-button { display: inline-flex; }
+.copy-button:hover { color: white; background: #ffffff10; }
+.copy-button svg { width: 12px; height: 12px; }
+.article pre { padding: 17px 18px; margin: 0; max-width: 100%; overflow: auto; color: #e6e0f2; line-height: 1.85; font-size: 12px; tab-size: 2; scrollbar-width: thin; scrollbar-color: #716284 transparent; }
+.article pre code { font-size: inherit; padding: 0; white-space: pre; }
+.mobile-toc { display: none; }
+.page-footer { border-top: 1px solid var(--line); margin-top: 40px; padding-top: 20px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 18px; font-size: 10px; color: #a09aaf; }
+.page-footer a { color: #8b7baf; }
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 100; max-width: calc(100vw - 32px); background: #302b42; color: white; padding: 11px 18px; border-radius: 8px; box-shadow: 0 8px 26px #302b4230; font-size: 12px; }
+[hidden] { display: none !important; }
+@media (max-width: 1050px) {
+  .doc-shell { column-gap: 34px; grid-template-columns: 206px minmax(0, 1fr); padding-inline: 26px; }
+  .header-inner { padding-inline: 26px; }
+  .header-links { gap: 17px; }
+}
+@media (max-width: 850px) {
+  .site-header { height: 62px; }
+  .header-inner { padding-inline: 20px; }
+  .header-links .secondary-link, .brand small { display: none; }
+  .brand { font-size: 17px; }
+  .brand-mark { height: 31px; width: 31px; font-size: 21px; }
+  .doc-shell { display: block; padding: 22px 22px 0; max-width: 760px; }
+  .sidebar { display: none; }
+  .mobile-toc { display: block; border: 1px solid #e8e3f3; border-radius: 8px; background: #faf9ff; margin-bottom: 29px; }
+  .mobile-toc summary { cursor: pointer; padding: 11px 13px; font-size: 12px; color: #6b5a94; }
+  .mobile-toc > nav { padding: 2px 8px 10px; max-height: 60dvh; overflow-y: auto; }
+  .doc-main { padding-top: 0; }
+  .article h1 { font-size: 27px; line-height: 1.5; }
+  .title-brand { display: block; color: #8876bc; font-size: 13px; letter-spacing: .2px; margin-bottom: 6px; }
+  .title-subject { display: block; font-size: clamp(21px, 6vw, 27px); }
+  .article h2 { font-size: 21px; margin-top: 36px; }
+  .article { font-size: 14px; }
+  .article > .resource-links { font-size: 10px; }
+  html { scroll-padding-top: 82px; }
+}
+@media (max-width: 420px) {
+  .header-inner { padding-inline: 16px; gap: 10px; }
+  .header-links { gap: 0; }
+  .header-links .header-cta { font-size: 11px; padding: 7px 9px; }
+  .doc-shell { padding-inline: 17px; }
+  .article h1 { font-size: 24px; }
+  .article h2 { font-size: 20px; }
+  .eyebrow { font-size: 9px; letter-spacing: 1.4px; }
+  .article pre { padding-inline: 13px; }
+  .endpoint { padding: 12px; gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media print {
+  @page { margin: 18mm; }
+  :root { font-size: 11px; }
+  .site-header, .sidebar, .mobile-toc, .copy-button, .toast, .skip-link { display: none !important; }
+  .doc-shell { display: block; padding: 0; max-width: none; }
+  .doc-main { max-width: none; }
+  .article { font-size: 11px; }
+  .article h1 { font-size: 23px; }
+  .article h2 { font-size: 17px; margin-top: 25px; break-after: avoid; }
+  .article h3, .article h4 { break-after: avoid; }
+  .article th, .article td { padding: 7px; font-size: 10px; }
+  .article table { min-width: 0; }
+  .table-scroll { overflow: visible; }
+  .code-block { background: #f8f7fa; border-color: #ddd; }
+  .code-toolbar { background: #efedf4; }
+  .code-language { color: #60556f; }
+  .article pre { color: #282335; white-space: pre-wrap; font-size: 9px; overflow: visible; }
+  .article pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+</style></head><body><a class="skip-link" href="#main-content">跳到文档正文</a>
+<header class="site-header"><div class="header-inner"><a class="brand" href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer"><span class="brand-mark" aria-hidden="true">B</span><span>Smart BIAI</span><small>开发者文档</small></a><nav class="header-links" aria-label="相关入口"><a class="secondary-link" href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">图片与视频 API ↗</a><a class="secondary-link" href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noopener noreferrer">GitHub ↗</a><a class="header-cta" href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">获取 API 凭证 ↗</a></nav></div></header>
+<div class="doc-shell"><aside class="sidebar" aria-label="文档侧栏"><div class="sidebar-label">SOCIAL MEDIA OPEN API</div><nav class="doc-nav" aria-label="章节目录"><a href="#1-概述"><span class="nav-number">01</span><span>概述</span></a><a href="#2-请求与响应约定"><span class="nav-number">02</span><span>请求与响应约定</span></a><a href="#3-查询社媒账号"><span class="nav-number">03</span><span>查询社媒账号</span></a><a href="#4-登记视频素材"><span class="nav-number">04</span><span>登记视频素材</span></a><a href="#5-视频标签"><span class="nav-number">05</span><span>视频标签</span></a><a href="#6-创建视频发布任务"><span class="nav-number">06</span><span>创建视频发布任务</span></a><a href="#7-查询发布任务状态"><span class="nav-number">07</span><span>查询发布任务状态</span></a><a href="#8-错误处理与重试"><span class="nav-number">08</span><span>错误处理与重试</span></a><a href="#9-推荐接入流程"><span class="nav-number">09</span><span>推荐接入流程</span></a><a href="#10-常见问题"><span class="nav-number">10</span><span>常见问题</span></a><a href="#11-相关资源"><span class="nav-number">11</span><span>相关资源</span></a></nav><div class="connection-card"><span>API BASE URL</span><code>https://border-api.biaibiai.com/open-api</code><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">申请 App ID 与 Access Token ↗</a></div><div class="sidebar-footer">TikTok · YouTube · Instagram<br>接口前缀 /v1 · 6 个开放接口</div></aside>
+<main class="doc-main" id="main-content"><details class="mobile-toc"><summary>文档目录 · 6 个开放接口</summary><nav class="doc-nav" aria-label="移动端章节目录"><a href="#1-概述"><span class="nav-number">01</span><span>概述</span></a><a href="#2-请求与响应约定"><span class="nav-number">02</span><span>请求与响应约定</span></a><a href="#3-查询社媒账号"><span class="nav-number">03</span><span>查询社媒账号</span></a><a href="#4-登记视频素材"><span class="nav-number">04</span><span>登记视频素材</span></a><a href="#5-视频标签"><span class="nav-number">05</span><span>视频标签</span></a><a href="#6-创建视频发布任务"><span class="nav-number">06</span><span>创建视频发布任务</span></a><a href="#7-查询发布任务状态"><span class="nav-number">07</span><span>查询发布任务状态</span></a><a href="#8-错误处理与重试"><span class="nav-number">08</span><span>错误处理与重试</span></a><a href="#9-推荐接入流程"><span class="nav-number">09</span><span>推荐接入流程</span></a><a href="#10-常见问题"><span class="nav-number">10</span><span>常见问题</span></a><a href="#11-相关资源"><span class="nav-number">11</span><span>相关资源</span></a></nav></details><p class="eyebrow">SMART BIAI OPEN API / SOCIAL</p><article class="article"><h1 id="smart-biai-海外社媒运营开放接口文档"><span class="title-brand">Smart BIAI</span> <span class="title-subject">海外社媒运营开放接口文档</span></h1>
+<p class="doc-meta">文档更新：2026-11-19 · 接口前缀：<code>/v1</code></p>
+<p class="resource-links"><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">Smart BIAI 官网</a> · <a href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">图片与视频生成 API</a> · <a href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noopener noreferrer">Smart BIAI Agent 开源项目</a> · <a href="https://developer.biaibiai.com/smart-biai-agent-static/" target="_blank" rel="noopener noreferrer">BIAI Agent 在线体验</a></p>
+<p class="public-address">本文公开地址：<a href="https://developer.biaibiai.com/global-social-docs" target="_blank" rel="noopener noreferrer">Smart BIAI 海外社媒运营开放接口文档</a>。</p>
+
+<h2 id="1-概述">1. 概述</h2>
+<p>Smart BIAI 社媒运营 API 面向自有应用、内容工作台和自动化流程，提供海外社媒账号查询、视频素材登记、视频标签管理、视频发布及发布状态查询能力。</p>
+<p>本文覆盖以下 6 个接口。账号需先在 Smart BIAI 完成接入和授权；App ID、Access Token 及接口权限请前往 <a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">Smart BIAI 官网</a> 获取或申请。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>方法</th>
+<th>路径</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="method get">GET</span></td>
+<td><code>/v1/account/page</code></td>
+<td>分页查询已接入的社媒账号</td>
+</tr>
+<tr>
+<td><span class="method post">POST</span></td>
+<td><code>/v1/material/video/batch-create</code></td>
+<td>批量登记视频素材，取得视频 ID</td>
+</tr>
+<tr>
+<td><span class="method post">POST</span></td>
+<td><code>/v1/material/video-label/create</code></td>
+<td>创建视频标签</td>
+</tr>
+<tr>
+<td><span class="method get">GET</span></td>
+<td><code>/v1/material/video-label/page</code></td>
+<td>分页查询视频标签</td>
+</tr>
+<tr>
+<td><span class="method post">POST</span></td>
+<td><code>/v1/publish/videos</code></td>
+<td>批量创建视频发布任务</td>
+</tr>
+<tr>
+<td><span class="method get">GET</span></td>
+<td><code>/v1/publish/status</code></td>
+<td>查询一条发布任务的状态</td>
+</tr>
+</tbody>
+</table></div>
+<p>当前说明涉及 <strong>TikTok、YouTube、Instagram</strong>。可发布账号、服务有效期与发布能力，以账号授权、应用权限及平台要求为准。</p>
+<p>本文不包含账号绑定或重新授权、账号及作品运营统计、平台全量历史作品查询、图片发布和主动取消已提交发布任务的接口。图片与视频生成属于另一组 API，见上方生成 API 文档。</p>
+<h3 id="11-两种视频发布方式">1.1 两种视频发布方式</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>方式</th>
+<th>操作顺序</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>视频直链</td>
+<td>查询账号 → 使用 <code>videoUrl</code> 创建发布任务 → 查询任务状态</td>
+<td>已取得可访问的视频地址，例如 AI 视频生成结果</td>
+</tr>
+<tr>
+<td>素材 ID</td>
+<td>查询账号 → 登记视频素材取得 <code>videoId</code> → 使用 <code>videoId</code> 创建发布任务 → 查询任务状态</td>
+<td>需要保存素材记录、附加标签或复用素材 ID</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>素材登记只保存记录，不会上传、转存视频文件。</strong> <code>url</code> 仍指向调用方提供的视频地址；取得视频 ID 不代表视频已经被永久存储。发布时源地址必须仍可访问。</p>
+<p>Smart BIAI Agent 当前采用视频直链方式发布，并保存发布响应返回的关联视频 ID。开发者也可以使用本文的素材及标签接口组织自己的素材库。</p>
+<h2 id="2-请求与响应约定">2. 请求与响应约定</h2>
+<h3 id="21-服务地址">2.1 服务地址</h3>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">TEXT</span><button type="button" class="copy-button" data-copy="example-1" aria-label="复制 TEXT 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="TEXT 示例代码"><code class="language-text" id="example-1">https://border-api.biaibiai.com/open-api
+</code></pre></div>
+<p>完整请求地址由服务地址加接口路径组成，例如：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">TEXT</span><button type="button" class="copy-button" data-copy="example-2" aria-label="复制 TEXT 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="TEXT 示例代码"><code class="language-text" id="example-2">https://border-api.biaibiai.com/open-api/v1/account/page
+</code></pre></div>
+<p>该地址与图片、视频生成服务地址不同。<strong>社媒 App ID + Access Token 与生成服务的应用 API Key 是两组凭证，不能混用。</strong></p>
+<h3 id="22-请求头">2.2 请求头</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>Header</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Authorization</code></td>
+<td>是</td>
+<td><code>Bearer &lt;access_token&gt;</code>，注意 <code>Bearer</code> 后有一个空格</td>
+</tr>
+<tr>
+<td><code>Client-Id</code></td>
+<td>是</td>
+<td>与 Access Token 配套的 App ID</td>
+</tr>
+<tr>
+<td><code>Content-Type</code></td>
+<td>是</td>
+<td><code>application/json</code>；GET 请求仍通过 URL 查询参数传值，不发送 JSON 请求体</td>
+</tr>
+<tr>
+<td><code>Idempotency-Key</code></td>
+<td>创建发布任务时必填</td>
+<td>一次批量发布请求的唯一键，最长 64 个字符；重试必须使用原键和原请求体</td>
+</tr>
+</tbody>
+</table></div>
+<p>本文仅对 <code>POST /v1/publish/videos</code> 约定必填幂等请求头。不要将发布接口的幂等保证推定为其他写接口的保证。</p>
+<p>凭证应由应用后端保存并调用，避免将完整 Access Token 写入网页源码、公开仓库或公开日志。</p>
+<h3 id="23-参数与分页">2.3 参数与分页</h3>
+<ul>
+<li>GET 参数放在查询字符串中；POST 参数为 JSON。素材登记和视频发布的请求体均为<strong>数组</strong>，即使只有一条记录也需要使用数组。</li>
+<li>分页从 <code>pageNo=1</code> 开始，默认每页 <code>10</code> 条，<code>pageSize</code> 最大为 <code>50</code>。</li>
+<li>分页响应通过 <code>data.list</code> 返回本页记录，<code>data.total</code> 返回总数。完整获取列表时逐页读取，不要只使用第一页。</li>
+<li><code>createTime</code> 等响应时间戳以毫秒为单位。<code>expiryDate</code> 为日期字符串，例如 <code>2027-12-31</code>。</li>
+<li>账号 ID、视频 ID、标签 ID 等数值标识可能为 64 位整数。JavaScript 调用方应使用无精度损失的 JSON 解析和序列化方式；不要先转为 <code>Number</code> 再保存。请求中声明为整数的字段仍需按整数发送。</li>
+<li>发布任务 <code>id</code>、<code>clientTaskId</code>、<code>Idempotency-Key</code> 为字符串。它们与素材 <code>videoId</code>、AI 视频生成任务 ID 不是同一种标识，不能互换。</li>
+</ul>
+<h3 id="24-统一响应">2.4 统一响应</h3>
+<p>成功时业务码 <code>code</code> 为 <code>0</code>，<code>data</code> 的结构由各接口定义：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-3" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-3">{
+  "code": 0,
+  "msg": "",
+  "data": {}
+}
+</code></pre></div>
+<p>业务失败示例：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-4" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-4">{
+  "code": 401,
+  "msg": "未认证或令牌已失效",
+  "data": null
+}
+</code></pre></div>
+<p>部分响应可能另外包含 <code>reason</code>、<code>traceId</code>、<code>requestId</code> 等字段，也可能为 <code>null</code>。诊断问题时可保留服务返回的追踪标识，不应将这些可选字段作为成功判断条件。</p>
+<p><strong>同时检查 HTTP 状态与业务码。HTTP 200 不代表 <code>code=0</code>；创建发布任务返回 <code>code=0</code> 只表示本次创建请求成功，不表示作品已经发布完成。</strong> 发布结果还需查询 <code>data.status</code>。</p>
+<h3 id="25-示例环境">2.5 示例环境</h3>
+<p>下文 cURL 示例适用于 Bash 等兼容 Shell。先设置自己的配置：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-5" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-5">export BIAI_SOCIAL_BASE_URL="https://border-api.biaibiai.com/open-api"
+export BIAI_SOCIAL_APP_ID="YOUR_APP_ID"
+export BIAI_SOCIAL_ACCESS_TOKEN="YOUR_ACCESS_TOKEN"
+</code></pre></div>
+<p>示例账号、标签、视频、任务 ID 和 <code>media.example.com</code> 地址均为占位数据。请替换成自己的已授权账号、真实接口返回的 ID 和有效视频地址；示例响应不代表实际调用结果。</p>
+<p>示例幂等键同样只用于演示。新的发布批次应生成自己的唯一键，同一批次重试时保留原键。</p>
+<h2 id="3-查询社媒账号">3. 查询社媒账号</h2>
+<h3 id="get-v1accountpage" class="endpoint"><span class="method get">GET</span><code>/v1/account/page</code></h3>
+<p>查询当前凭证可访问的账号。发布前先取得目标账号 ID，并确认授权及服务状态。</p>
+<h4 id="查询参数">查询参数</h4>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pageNo</code></td>
+<td>integer</td>
+<td>否</td>
+<td>页码，从 1 开始，默认 1</td>
+</tr>
+<tr>
+<td><code>pageSize</code></td>
+<td>integer</td>
+<td>否</td>
+<td>每页条数，默认 10，最大 50</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>integer(int64)</td>
+<td>否</td>
+<td>按账号 ID 查询</td>
+</tr>
+<tr>
+<td><code>platform</code></td>
+<td>integer</td>
+<td>否</td>
+<td>平台编码，见下表</td>
+</tr>
+</tbody>
+</table></div>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>平台编码</th>
+<th>平台</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>10</code></td>
+<td>TikTok</td>
+</tr>
+<tr>
+<td><code>40</code></td>
+<td>YouTube</td>
+</tr>
+<tr>
+<td><code>70</code></td>
+<td>Instagram</td>
+</tr>
+</tbody>
+</table></div>
+<p>国家、名称和别名可以使用返回字段在调用方筛选。本接口当前参数表未定义 <code>country</code>、<code>name</code>、<code>keyword</code> 等服务端筛选参数，不应自行假定传入即可生效。</p>
+<h4 id="请求示例">请求示例</h4>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-6" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-6">curl --get "$BIAI_SOCIAL_BASE_URL/v1/account/page" \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  --data-urlencode 'pageNo=1' \
+  --data-urlencode 'pageSize=20' \
+  --data-urlencode 'platform=10'
+</code></pre></div>
+<p>按指定账号查询时，增加 <code>id</code> 参数即可。</p>
+<h4 id="响应字段">响应字段</h4>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data.list</code></td>
+<td>array</td>
+<td>本页账号列表</td>
+</tr>
+<tr>
+<td><code>data.total</code></td>
+<td>integer</td>
+<td>记录总数</td>
+</tr>
+<tr>
+<td><code>list[].id</code></td>
+<td>integer(int64)</td>
+<td>社媒账号 ID，用于发布请求的 <code>accountId</code></td>
+</tr>
+<tr>
+<td><code>list[].platform</code></td>
+<td>integer</td>
+<td>平台编码</td>
+</tr>
+<tr>
+<td><code>list[].country</code></td>
+<td>string</td>
+<td>国家信息，例如 <code>US</code>；按实际返回值处理</td>
+</tr>
+<tr>
+<td><code>list[].name</code></td>
+<td>string</td>
+<td>账号名称</td>
+</tr>
+<tr>
+<td><code>list[].alias</code></td>
+<td>string</td>
+<td>账号别名，可能为空</td>
+</tr>
+<tr>
+<td><code>list[].profileImage</code></td>
+<td>string</td>
+<td>头像地址</td>
+</tr>
+<tr>
+<td><code>list[].authStatus</code></td>
+<td>integer</td>
+<td>账号授权状态</td>
+</tr>
+<tr>
+<td><code>list[].expiryDate</code></td>
+<td>string</td>
+<td>服务到期日期</td>
+</tr>
+<tr>
+<td><code>list[].createTime</code></td>
+<td>integer(int64)</td>
+<td>创建时间，毫秒时间戳</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-7" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-7">{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "list": [
+      {
+        "id": 101,
+        "platform": 10,
+        "country": "US",
+        "name": "brand-example",
+        "alias": "品牌主号",
+        "profileImage": "https://media.example.com/avatar.jpg",
+        "authStatus": 20,
+        "expiryDate": "2027-12-31",
+        "createTime": 1795046400000
+      }
+    ],
+    "total": 1
+  }
+}
+</code></pre></div>
+<h4 id="授权状态与发布条件">授权状态与发布条件</h4>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th><code>authStatus</code></th>
+<th>含义</th>
+<th>是否允许创建发布任务</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>10</code></td>
+<td>未授权</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>20</code></td>
+<td>已授权</td>
+<td>是，仍需满足账号有效期、应用权限和平台要求</td>
+</tr>
+<tr>
+<td><code>30</code></td>
+<td>授权失败</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>40</code></td>
+<td>授权异常</td>
+<td>否</td>
+</tr>
+</tbody>
+</table></div>
+<p>调用方必须在确认发布前检查账号状态；定时发布到期时也应重新检查。未知状态按不可发布处理。账号需要授权或恢复授权时，在 Smart BIAI 完成相应操作。</p>
+<h2 id="4-登记视频素材">4. 登记视频素材</h2>
+<h3 id="post-v1materialvideobatch-create" class="endpoint"><span class="method post">POST</span><code>/v1/material/video/batch-create</code></h3>
+<p>批量登记已有视频的地址和信息，返回可用于发布的素材 ID。该接口名称中的“上传”指提交素材记录，<strong>不接收文件二进制，不使用 multipart，不会把视频文件上传或转存到 Smart BIAI</strong>。</p>
+<p>如果仅需要使用现成视频地址发布，可以跳过本接口，直接在发布请求中使用 <code>videoUrl</code>。</p>
+<h4 id="请求体">请求体</h4>
+<p>请求体为对象数组，下表字段作用于数组中的每一项。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>是</td>
+<td>视频名称，最多 255 个字符</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+<td>是</td>
+<td>视频文件地址，最多 1000 个字符</td>
+</tr>
+<tr>
+<td><code>coverUrl</code></td>
+<td>string</td>
+<td>否</td>
+<td>封面地址，最多 1000 个字符；无封面时可传空字符串</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td>string</td>
+<td>否</td>
+<td>视频标签 ID 列表，多个 ID 用英文逗号分隔，最多 255 个字符，例如 <code>"501,502"</code></td>
+</tr>
+<tr>
+<td><code>copywriting</code></td>
+<td>string</td>
+<td>否</td>
+<td>素材文案，最多 1000 个字符；不替代后续发布必填的 <code>title</code></td>
+</tr>
+<tr>
+<td><code>fileSize</code></td>
+<td>integer(int64)</td>
+<td>否</td>
+<td>已知的视频文件大小，单位字节；未知时省略</td>
+</tr>
+<tr>
+<td><code>videoDuration</code></td>
+<td>integer(int64)</td>
+<td>否</td>
+<td>视频时长，单位秒；未知时省略</td>
+</tr>
+<tr>
+<td><code>suffix</code></td>
+<td>string</td>
+<td>否</td>
+<td>文件后缀，最多 50 个字符，例如 <code>mp4</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>建议使用无需登录即可读取的公网 HTTPS 视频直链，确保发布处理期间地址不失效。不要使用网页播放页地址代替视频文件地址。无封面时不必另外生成封面，示例使用 <code>coverUrl: ""</code>。</p>
+<h4 id="请求示例_1">请求示例</h4>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-8" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-8">curl "$BIAI_SOCIAL_BASE_URL/v1/material/video/batch-create" \
+  -X POST \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  --data '[
+    {
+      "name": "产品演示视频",
+      "url": "https://media.example.com/product-video.mp4",
+      "coverUrl": "",
+      "videoDuration": 6,
+      "suffix": "mp4"
+    }
+  ]'
+</code></pre></div>
+<p>如需关联标签，先创建或查询标签，再增加 <code>"label": "501,502"</code>。不要将标签名称写入 <code>label</code> 代替标签 ID。</p>
+<h4 id="成功响应">成功响应</h4>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-9" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-9">{
+  "code": 0,
+  "msg": "",
+  "data": [
+    {
+      "id": 42802,
+      "name": "产品演示视频",
+      "url": "https://media.example.com/product-video.mp4"
+    }
+  ]
+}
+</code></pre></div>
+<p><code>data[].id</code> 为视频素材 ID，可用于发布请求中的 <code>videoId</code>。保存返回的 ID 与视频地址关联，不要使用 AI 视频生成任务 ID 代替它。视频已存在等错误需结合 <code>code</code>、<code>msg</code> 和已保存记录处理；本接口未约定与发布接口相同的幂等重试能力。</p>
+<h2 id="5-视频标签">5. 视频标签</h2>
+<h3 id="51-创建标签">5.1 创建标签</h3>
+<p><strong><code>POST /v1/material/video-label/create</code></strong></p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>label</code></td>
+<td>string</td>
+<td>是</td>
+<td>标签名称，最多 255 个字符</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-10" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-10">curl "$BIAI_SOCIAL_BASE_URL/v1/material/video-label/create" \
+  -X POST \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  --data '{"label":"产品演示"}'
+</code></pre></div>
+<p>成功时 <code>data</code> 直接返回标签 ID，不是包含 <code>id</code> 的对象：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-11" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-11">{
+  "code": 0,
+  "msg": "",
+  "data": 501
+}
+</code></pre></div>
+<p>标签已存在时可能返回如下业务失败。可通过标签分页接口查找已有标签后复用，不必反复创建。</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-12" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-12">{
+  "code": 1005003000,
+  "msg": "视频标签已存在",
+  "data": null
+}
+</code></pre></div>
+<h3 id="52-分页查询标签">5.2 分页查询标签</h3>
+<p><strong><code>GET /v1/material/video-label/page</code></strong></p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pageNo</code></td>
+<td>integer</td>
+<td>否</td>
+<td>页码，从 1 开始，默认 1</td>
+</tr>
+<tr>
+<td><code>pageSize</code></td>
+<td>integer</td>
+<td>否</td>
+<td>默认 10，最大 50</td>
+</tr>
+<tr>
+<td><code>label</code></td>
+<td>string</td>
+<td>否</td>
+<td>按标签名称模糊查询</td>
+</tr>
+<tr>
+<td><code>createTime[0]</code></td>
+<td>string</td>
+<td>否</td>
+<td>创建时间范围起点，格式 <code>YYYY-MM-DD HH:mm:ss</code></td>
+</tr>
+<tr>
+<td><code>createTime[1]</code></td>
+<td>string</td>
+<td>否</td>
+<td>创建时间范围终点，格式同上</td>
+</tr>
+</tbody>
+</table></div>
+<p>时间范围应同时传入起点和终点；过滤时间按服务约定的时区填写，不要将返回的毫秒时间戳直接作为上述日期字符串参数发送。</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-13" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-13">curl --get "$BIAI_SOCIAL_BASE_URL/v1/material/video-label/page" \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  --data-urlencode 'pageNo=1' \
+  --data-urlencode 'pageSize=20' \
+  --data-urlencode 'label=产品' \
+  --data-urlencode 'createTime[0]=2026-11-01 00:00:00' \
+  --data-urlencode 'createTime[1]=2026-11-19 23:59:59'
+</code></pre></div>
+<h4 id="成功响应_1">成功响应</h4>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-14" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-14">{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "list": [
+      {
+        "id": 501,
+        "label": "产品演示",
+        "createTime": 1795046400000
+      }
+    ],
+    "total": 1
+  }
+}
+</code></pre></div>
+<p><code>list[].id</code> 为标签 ID，<code>label</code> 为名称，<code>createTime</code> 为毫秒时间戳。这里的查询字段 <code>label</code> 是名称，而素材登记中的 <code>label</code> 是逗号分隔的标签 ID 字符串，两者含义不同。</p>
+<h2 id="6-创建视频发布任务">6. 创建视频发布任务</h2>
+<h3 id="post-v1publishvideos" class="endpoint"><span class="method post">POST</span><code>/v1/publish/videos</code></h3>
+<p>对一个或多个账号创建视频发布任务。调用前确认目标账号处于 <code>authStatus=20</code>、服务仍有效，且视频地址可读取。</p>
+<h4 id="幂等要求">幂等要求</h4>
+<p>必须携带 <code>Idempotency-Key</code>，长度不超过 64 个字符。一个键对应<strong>整个批量请求</strong>。</p>
+<ul>
+<li>首次提交前生成唯一键，并保存键、完整请求体和各项 <code>clientTaskId</code>。</li>
+<li>超时、连接中断或结果不明确时，使用原键和原请求体重试，不要更换键，也不要修改账号、素材、文案或数组顺序。</li>
+<li>相同键和相同请求会返回首次处理结果；相同键用于不同请求会返回 <code>1007000110</code>。</li>
+<li>服务返回“处理中”时等待后再查询或使用原请求恢复结果，不要立即创建另一批发布任务。</li>
+<li><code>clientTaskId</code> 用于本地与远端任务关联，不能代替必填的幂等请求头。</li>
+</ul>
+<p>本文不承诺幂等记录的具体保留时长。长时间无法确定受理结果时，应保留待核实状态并核对原任务，避免使用新键重复发布。</p>
+<h4 id="请求体_1">请求体</h4>
+<p>请求体为对象数组，下表字段作用于每一项。</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>字段</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>accountId</code></td>
+<td>integer(int64)</td>
+<td>是</td>
+<td>社媒账号 ID，来自账号查询接口</td>
+</tr>
+<tr>
+<td><code>videoId</code></td>
+<td>integer(int64)</td>
+<td>二选一</td>
+<td>已登记的视频素材 ID；与 <code>videoUrl</code> 至少提供一个，同时提供时优先使用 <code>videoId</code></td>
+</tr>
+<tr>
+<td><code>videoUrl</code></td>
+<td>string</td>
+<td>二选一</td>
+<td>公网视频文件地址；使用直链方式时填写</td>
+</tr>
+<tr>
+<td><code>coverUrl</code></td>
+<td>string</td>
+<td>否</td>
+<td>封面地址，无封面时可传 <code>""</code>；使用生成视频时优先使用生成结果的封面</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>是</td>
+<td>发布标题或文案，需符合目标平台要求</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>否</td>
+<td>描述，YouTube 平台生效</td>
+</tr>
+<tr>
+<td><code>isAiGenerated</code></td>
+<td>integer</td>
+<td>否</td>
+<td>AI 生成标记：<code>0</code> 否、<code>1</code> 是，默认 <code>0</code>；按整数发送</td>
+</tr>
+<tr>
+<td><code>clientTaskId</code></td>
+<td>string</td>
+<td>否</td>
+<td>调用方为这一条发布记录分配的唯一 ID；创建成功后原样返回，建议每项都填写</td>
+</tr>
+</tbody>
+</table></div>
+<p>批量请求中的每一项建议使用不同的 <code>clientTaskId</code>。例如同一视频发布到两个账号时，分别分配两个本地发布 ID，整个请求共用一个 <code>Idempotency-Key</code>。</p>
+<p>本接口没有定时时间、时区或排期字段。<strong>调用接口即开始创建发布任务；定时发布需由调用方保存排期，到期后再调用本接口。</strong></p>
+<h4 id="方式-a视频直链发布">方式 A：视频直链发布</h4>
+<p>以下使用 AI 生成视频或其他已有视频地址。缺少封面时不要求用户补齐封面。</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-15" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-15">curl "$BIAI_SOCIAL_BASE_URL/v1/publish/videos" \
+  -X POST \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: publish-20261119-001" \
+  --data '[
+    {
+      "accountId": 101,
+      "videoUrl": "https://media.example.com/product-video.mp4",
+      "coverUrl": "",
+      "title": "产品演示视频",
+      "isAiGenerated": 1,
+      "clientTaskId": "content-20261119-001-tiktok"
+    }
+  ]'
+</code></pre></div>
+<h4 id="方式-b素材-id-发布">方式 B：素材 ID 发布</h4>
+<p>先使用素材登记接口取得 <code>videoId</code>。下面的 <code>102</code> 代表示例 YouTube 账号，需替换为自己查询到的账号。</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-16" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-16">curl "$BIAI_SOCIAL_BASE_URL/v1/publish/videos" \
+  -X POST \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: publish-20261119-002" \
+  --data '[
+    {
+      "accountId": 102,
+      "videoId": 42802,
+      "title": "产品演示视频",
+      "description": "介绍产品的使用方式与实际场景。",
+      "isAiGenerated": 1,
+      "clientTaskId": "content-20261119-001-youtube"
+    }
+  ]'
+</code></pre></div>
+<h4 id="成功响应_2">成功响应</h4>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-17" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-17">{
+  "code": 0,
+  "msg": "",
+  "data": [
+    {
+      "id": "pub_example_001",
+      "status": 10,
+      "accountId": 101,
+      "videoId": 42802,
+      "videoUrl": "https://media.example.com/product-video.mp4",
+      "title": "产品演示视频",
+      "description": "",
+      "createTime": 1795046400000,
+      "clientTaskId": "content-20261119-001-tiktok",
+      "remark": ""
+    }
+  ]
+}
+</code></pre></div>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>响应字段</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data</code></td>
+<td>array</td>
+<td>发布任务结果数组，按 <code>clientTaskId</code> 关联本地记录，不只依赖数组位置</td>
+</tr>
+<tr>
+<td><code>data[].id</code></td>
+<td>string</td>
+<td>发布任务 ID，后续状态查询使用此字段</td>
+</tr>
+<tr>
+<td><code>data[].status</code></td>
+<td>integer</td>
+<td>发布任务状态，见下一节</td>
+</tr>
+<tr>
+<td><code>data[].accountId</code></td>
+<td>integer(int64)</td>
+<td>目标账号 ID</td>
+</tr>
+<tr>
+<td><code>data[].videoId</code></td>
+<td>integer(int64)</td>
+<td>关联视频素材 ID</td>
+</tr>
+<tr>
+<td><code>data[].videoUrl</code></td>
+<td>string</td>
+<td>视频地址</td>
+</tr>
+<tr>
+<td><code>data[].title</code></td>
+<td>string</td>
+<td>发布标题或文案</td>
+</tr>
+<tr>
+<td><code>data[].description</code></td>
+<td>string</td>
+<td>描述，按实际返回值处理</td>
+</tr>
+<tr>
+<td><code>data[].createTime</code></td>
+<td>integer(int64)</td>
+<td>任务创建时间，毫秒时间戳</td>
+</tr>
+<tr>
+<td><code>data[].clientTaskId</code></td>
+<td>string</td>
+<td>对应请求项的本地任务 ID</td>
+</tr>
+<tr>
+<td><code>data[].remark</code></td>
+<td>string</td>
+<td>备注，可能为空</td>
+</tr>
+</tbody>
+</table></div>
+<p>保存每个成功返回项的远端 <code>id</code>。后续查询使用这个发布任务 ID，不是 <code>videoId</code>，也不是 <code>clientTaskId</code>。</p>
+<p>批量场景不要只读取 <code>data[0]</code>。逐项核对远端任务与本地 <code>clientTaskId</code> 的对应；若缺少预期返回项，保留待核实状态并使用原幂等请求恢复结果，不直接换新键补发。</p>
+<h2 id="7-查询发布任务状态">7. 查询发布任务状态</h2>
+<h3 id="get-v1publishstatus" class="endpoint"><span class="method get">GET</span><code>/v1/publish/status</code></h3>
+<h4 id="查询参数_1">查询参数</h4>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>必填</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>是</td>
+<td>创建发布任务时返回的远端发布任务 ID</td>
+</tr>
+</tbody>
+</table></div>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">BASH</span><button type="button" class="copy-button" data-copy="example-18" aria-label="复制 BASH 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="BASH 示例代码"><code class="language-sh" id="example-18">curl --get "$BIAI_SOCIAL_BASE_URL/v1/publish/status" \
+  -H "Authorization: Bearer $BIAI_SOCIAL_ACCESS_TOKEN" \
+  -H "Client-Id: $BIAI_SOCIAL_APP_ID" \
+  -H "Content-Type: application/json" \
+  --data-urlencode 'id=pub_example_001'
+</code></pre></div>
+<h4 id="发布状态">发布状态</h4>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th><code>status</code></th>
+<th>含义</th>
+<th>调用方处理建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>10</code></td>
+<td>待发布</td>
+<td>保存任务，继续查询</td>
+</tr>
+<tr>
+<td><code>20</code></td>
+<td>发布中</td>
+<td>继续等待，不重复创建</td>
+</tr>
+<tr>
+<td><code>30</code></td>
+<td>发布完成</td>
+<td>记录成功，停止常规轮询</td>
+</tr>
+<tr>
+<td><code>40</code></td>
+<td>发布失败</td>
+<td>记录失败及服务返回的备注，停止常规轮询，核对原因后再决定是否新建任务</td>
+</tr>
+<tr>
+<td><code>50</code></td>
+<td>取消发布</td>
+<td>记录已取消，停止常规轮询</td>
+</tr>
+</tbody>
+</table></div>
+<p>该状态表描述服务返回值，不代表本文提供了取消接口。调用方尚未提交的本地排期可以自行取消；已提交任务不能仅删除本地记录就视为平台已取消。</p>
+<p>建议处理中任务每 5～10 秒查询一次；这是调用方的轮询建议，不是接口承诺的频率上限。遇到限流时降低频率，并在服务返回 <code>Retry-After</code> 时遵循该值。遇到未知状态时保留原值并标记待核实，不应直接认定成功或创建新的发布任务。</p>
+<p>本接口查询的是<strong>社媒视频发布任务</strong>，不用于查询 AI 图片或视频生成状态。</p>
+<h4 id="成功响应_3">成功响应</h4>
+<p><code>data</code> 为单个任务对象，字段与创建发布响应中的单项相同：</p>
+<div class="code-block"><div class="code-toolbar"><span class="code-language">JSON</span><button type="button" class="copy-button" data-copy="example-19" aria-label="复制 JSON 示例"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"></rect><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4"></path></svg><span>复制代码</span></button></div><pre tabindex="0" aria-label="JSON 示例代码"><code class="language-json" id="example-19">{
+  "code": 0,
+  "msg": "",
+  "data": {
+    "id": "pub_example_001",
+    "status": 30,
+    "accountId": 101,
+    "videoId": 42802,
+    "videoUrl": "https://media.example.com/product-video.mp4",
+    "title": "产品演示视频",
+    "description": "",
+    "createTime": 1795046400000,
+    "clientTaskId": "content-20261119-001-tiktok",
+    "remark": ""
+  }
+}
+</code></pre></div>
+<p>不要自行假定任务会返回社媒作品链接、播放量或粉丝数据；本文定义的返回字段不包含这些信息。</p>
+<h2 id="8-错误处理与重试">8. 错误处理与重试</h2>
+<h3 id="81-http-状态">8.1 HTTP 状态</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>HTTP 状态</th>
+<th>含义与处理建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>200</code></td>
+<td>仍需检查 JSON 中的业务码 <code>code</code></td>
+</tr>
+<tr>
+<td><code>400</code></td>
+<td>检查参数结构、类型和必填字段</td>
+</tr>
+<tr>
+<td><code>401</code></td>
+<td>检查 Access Token 是否有效，以及是否与 App ID 配套</td>
+</tr>
+<tr>
+<td><code>403</code></td>
+<td>检查应用及账号操作权限</td>
+</tr>
+<tr>
+<td><code>404</code></td>
+<td>检查资源 ID、资源可见范围及请求地址</td>
+</tr>
+<tr>
+<td><code>429</code></td>
+<td>降低请求频率，按服务提示延迟重试</td>
+</tr>
+<tr>
+<td><code>500</code> 等服务端错误</td>
+<td>写请求受理结果可能不明确；发布请求保留原幂等键和请求体，不立即换键重发</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="82-常见业务码">8.2 常见业务码</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th><code>code</code></th>
+<th>说明与处理建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>本次接口调用成功；发布结果另看任务 <code>status</code></td>
+</tr>
+<tr>
+<td><code>401</code> / <code>403</code></td>
+<td>认证或权限问题，检查 App ID、Access Token 及授权</td>
+</tr>
+<tr>
+<td><code>1007000110</code></td>
+<td>幂等键已用于不同请求，核对原请求；不要将不同请求复用同一键</td>
+</tr>
+<tr>
+<td><code>1007000111</code></td>
+<td>操作处理中，等待并使用原请求恢复结果</td>
+</tr>
+<tr>
+<td><code>1007000112</code></td>
+<td>幂等操作失败，保留具体 <code>msg</code> 并核对原业务结果</td>
+</tr>
+<tr>
+<td><code>1007000114</code></td>
+<td><code>Idempotency-Key</code> 为空或长度超过 64 个字符</td>
+</tr>
+<tr>
+<td><code>1005004000</code></td>
+<td>视频已存在，先核对已保存的素材 ID 与地址关联</td>
+</tr>
+<tr>
+<td><code>1005003000</code></td>
+<td>依接口场景判断：标签创建可表示“视频标签已存在”，发布场景可表示任务超限；结合 <code>msg</code> 处理</td>
+</tr>
+<tr>
+<td><code>1004800003</code></td>
+<td>素材 ID 与素材 URL 不能同时为空</td>
+</tr>
+<tr>
+<td><code>1004800004</code></td>
+<td>素材资源未验证，核对素材与服务返回的信息</td>
+</tr>
+<tr>
+<td><code>1004800005</code></td>
+<td>素材 URL 无效，检查是否为可访问的视频文件地址</td>
+</tr>
+<tr>
+<td><code>1004800006</code></td>
+<td>素材不存在，核对素材 ID 与可见范围</td>
+</tr>
+<tr>
+<td><code>1004800007</code></td>
+<td>发布任务创建失败，查看具体 <code>msg</code>，保留本地业务记录</td>
+</tr>
+<tr>
+<td><code>1004009017</code></td>
+<td>发布账号不存在，重新查询当前凭证可见账号</td>
+</tr>
+<tr>
+<td><code>1004008001</code></td>
+<td>发布任务不存在，确认使用的是远端发布任务 ID</td>
+</tr>
+</tbody>
+</table></div>
+<p>错误码需要与具体接口和 <code>msg</code> 一起判断。页面可展示具体原因，长文本可截断摘要并提供完整详情；不要只显示“失败”而丢弃服务返回的信息。记录诊断信息时隐藏凭证。</p>
+<p>区分两种情况：</p>
+<ul>
+<li><strong>请求失败</strong>：HTTP 失败或业务 <code>code</code> 非 0。特别是超时、处理中和受理结果不明时，不能推定没有创建任务。</li>
+<li><strong>任务失败</strong>：请求 <code>code=0</code>，但返回的发布任务 <code>status=40</code>。这是异步发布失败；保留任务及可用的 <code>remark</code>，核对后再决定是否创建新的尝试。</li>
+</ul>
+<h2 id="9-推荐接入流程">9. 推荐接入流程</h2>
+<h3 id="91-立即发布">9.1 立即发布</h3>
+<ol>
+<li>配置配套的 App ID 与 Access Token，分页查询目标平台账号。</li>
+<li>仅选择 <code>authStatus=20</code> 且仍可发布的账号。</li>
+<li>取得有效的视频文件地址；如使用 AI 视频，先等生成成功并预览。封面使用生成结果地址，缺失时留空。</li>
+<li>选择直链发布，或先登记素材并保存视频 ID；需要标签时先创建或查询标签。</li>
+<li>展示目标账号、视频、标题、描述和 AI 生成标记，供用户确认。</li>
+<li>保存本地发布 ID、批次幂等键及完整请求体，调用发布接口。</li>
+<li>按 <code>clientTaskId</code> 关联返回项，保存远端发布任务 ID。</li>
+<li>轮询发布状态，达到完成、失败或取消状态后停止常规查询。</li>
+</ol>
+<h3 id="92-定时发布">9.2 定时发布</h3>
+<p>这 6 个接口不包含定时发布字段。调用方可按以下方式实现：</p>
+<ol>
+<li>在本地保存发布草稿、目标账号、用户确认结果、时间和明确的时区，将执行时刻统一保存为时间戳。</li>
+<li>到期后重新检查账号授权、有效期与视频可访问性；签名链接失效时，在源服务仍保留文件的情况下取得新链接。</li>
+<li>确认视频可用后生成并保存本次提交的幂等键和最终请求体，再调用发布接口。</li>
+<li>一旦已经开始提交，同一业务重试保持该请求体不变。不要在结果不明时更换签名 URL、文案或幂等键后再次提交。</li>
+<li>持续查询发布状态。尚未提交的本地排期可以取消；已经提交的任务需要按服务实际能力处理。</li>
+</ol>
+<p>签名 URL 的链接有效期与源视频文件保留期是不同概念。素材登记不会延长任一有效期。平台处理具有延迟，调用时间也不等同于作品精确公开时间。</p>
+<h3 id="93-调用方建议保存的信息">9.3 调用方建议保存的信息</h3>
+<div class="table-scroll" tabindex="0" role="region" aria-label="接口数据表格，可横向滚动"><table>
+<thead>
+<tr>
+<th>信息</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>社媒账号 ID、平台及最近授权状态</td>
+<td>选择与检查发布账号</td>
+</tr>
+<tr>
+<td>源视频地址、可选封面及已知有效期</td>
+<td>预览、提交前检查可用性</td>
+</tr>
+<tr>
+<td>可选素材 ID、标签 ID</td>
+<td>复用已登记的素材与标签</td>
+</tr>
+<tr>
+<td>本地 <code>clientTaskId</code>、批次幂等键和完整请求体</td>
+<td>业务关联、恢复原请求、防止重复提交</td>
+</tr>
+<tr>
+<td>远端发布任务 ID、状态和返回备注</td>
+<td>状态查询与问题诊断</td>
+</tr>
+<tr>
+<td>用户确认结果、可选排期时间及其时区</td>
+<td>确认发布范围并在指定时刻提交</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="10-常见问题">10. 常见问题</h2>
+<p><strong>接口凭证在哪里获取？</strong></p>
+<p>前往 <a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">Smart BIAI 官网</a> 获取或申请社媒 App ID、Access Token 及相应权限。图片与视频生成服务的应用 API Key 不能代替社媒凭证。</p>
+<p><strong>查询不到账号，或账号显示已授权仍不能发布？</strong></p>
+<p>核对 App ID 与 Access Token 是否配套、账号是否在当前可见范围、分页是否读取完整，以及服务有效期和平台权限。只有 <code>authStatus=20</code> 可以进入发布流程，但它不是唯一的可发布条件。</p>
+<p><strong>必须先调用视频素材登记接口吗？</strong></p>
+<p>不必。发布接口支持 <code>videoUrl</code> 直链，也支持已登记的 <code>videoId</code>。同一项同时传入时优先使用 <code>videoId</code>；需要切换素材时先核对是否误带了旧 ID。</p>
+<p><strong>登记素材后可以删除源视频或等待源链接过期吗？</strong></p>
+<p>不可以据此假定视频已被存储。登记只保存记录，发布处理仍需要能够访问源视频。应确保源链接和源文件在处理期间有效。</p>
+<p><strong>没有视频封面怎么办？</strong></p>
+<p>封面可留空。使用生成服务返回的封面地址；没有时传 <code>coverUrl: ""</code>，不要求为发布额外生成封面。</p>
+<p><strong>发布请求超时了，可以换一个幂等键再发吗？</strong></p>
+<p>不要为同一次业务换键重发。先使用原键和原请求体恢复结果；已有远端任务 ID 时查询该任务。无法确认时保留待核实状态，避免重复发布。</p>
+<p><strong>能通过 <code>clientTaskId</code> 直接查询发布状态吗？</strong></p>
+<p>本文状态接口只接受远端任务 <code>id</code>。<code>clientTaskId</code> 用于创建响应与本地记录关联。若创建响应丢失，应使用原幂等请求恢复返回结果，而不是把 <code>clientTaskId</code> 当作远端 ID 查询。</p>
+<p><strong>可以通过本文接口获取账号全部历史作品、播放量或发布图片吗？</strong></p>
+<p>本文不提供这些接口。调用方可维护通过自身应用发起的发布记录；AI 图片生成能力见 <a href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">生成 API 文档</a>，不代表已经支持将图片直接发布到社媒。</p>
+<h2 id="11-相关资源">11. 相关资源</h2>
+<ul>
+<li><a href="https://www.biaibiai.com/" target="_blank" rel="noopener noreferrer">Smart BIAI 官网与接入申请</a></li>
+<li><a href="https://developer.biaibiai.com/docs" target="_blank" rel="noopener noreferrer">Smart BIAI 图片与视频生成 API</a></li>
+<li><a href="https://github.com/SmartBIAI/smart-biai-agent" target="_blank" rel="noopener noreferrer">Smart BIAI Agent 开源项目</a></li>
+<li><a href="https://developer.biaibiai.com/smart-biai-agent-static/" target="_blank" rel="noopener noreferrer">BIAI Agent 在线体验：模拟账号、创作与发布流程</a></li>
+</ul></article><footer class="page-footer"><span>Smart BIAI · 海外社媒运营开放接口文档</span><a href="https://developer.biaibiai.com/global-social-docs">在线文档 ↗</a></footer></main></div><div id="copy-status" class="toast" role="status" hidden=""></div><script>document.documentElement.classList.add('js');
+const toast = document.querySelector('#copy-status');
+let toastTimer;
+async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; } catch { /* Local file and browser settings may need the fallback. */ }
+  }
+  const previous = document.activeElement;
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.style.cssText = 'position:fixed;left:0;top:0;opacity:0;';
+  document.body.append(field);
+  field.focus(); field.select();
+  const copied = document.execCommand('copy');
+  field.remove(); previous?.focus({preventScroll:true});
+  if (!copied) throw Error('copy unavailable');
+}
+document.addEventListener('click', async event => {
+  if (event.target.closest('.mobile-toc a[href^="#"]')) document.querySelector('.mobile-toc').open = false;
+  const button = event.target.closest('[data-copy]');
+  if (!button) return;
+  try {
+    await copyText(document.getElementById(button.dataset.copy).textContent);
+    toast.textContent = '示例代码已复制';
+  } catch { toast.textContent = '请选取代码后复制'; }
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.hidden = true; }, 2200);
+});
+const headings = [...document.querySelectorAll('.article h2')];
+const links = [...document.querySelectorAll('.doc-nav a')];
+let scheduled = false;
+function updateNavigation() {
+  const active = headings.filter(heading => heading.getBoundingClientRect().top <= 135).at(-1) || headings[0];
+  for (const link of links) {
+    if (decodeURIComponent(link.hash.slice(1)) === active?.id) link.setAttribute('aria-current', 'true');
+    else link.removeAttribute('aria-current');
+  }
+  scheduled = false;
+}
+addEventListener('scroll', () => { if (!scheduled) { scheduled = true; requestAnimationFrame(updateNavigation); } }, {passive:true});
+addEventListener('hashchange', () => { document.querySelector('.mobile-toc').open = false; updateNavigation(); });
+updateNavigation();
+</script></body></html>

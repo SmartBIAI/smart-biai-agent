@@ -4,7 +4,7 @@
 
 [Smart BIAI 官网](https://www.biaibiai.com/) · [图片与视频生成 API](https://developer.biaibiai.com/docs) · [Smart BIAI Agent 开源项目](https://github.com/SmartBIAI/smart-biai-agent) · [BIAI Agent 在线体验](https://developer.biaibiai.com/smart-biai-agent-static/)
 
-本文公开地址：[Smart BIAI 海外社媒运营开放接口文档](https://developer.biaibiai.com/docs/SmartBIAI海外社媒运营开放接口文档.md)。
+本文公开地址：[Smart BIAI 海外社媒运营开放接口文档](https://developer.biaibiai.com/global-social-docs)。
 
 目录：[概述](#1-概述) · [认证与通用约定](#2-请求与响应约定) · [账号查询](#3-查询社媒账号) · [素材登记](#4-登记视频素材) · [视频标签](#5-视频标签) · [创建发布](#6-创建视频发布任务) · [发布状态](#7-查询发布任务状态) · [错误与重试](#8-错误处理与重试) · [接入流程](#9-推荐接入流程) · [常见问题](#10-常见问题)
 
