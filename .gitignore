@@ -19,6 +19,7 @@ uploads/
 !/doc/宝塔Docker首次部署.md
 !/doc/更新说明.md
 !/doc/Agent使用说明.md
+!/doc/SmartBIAI海外社媒运营开放接口文档.md
 
 # Private site tooling is maintained outside the public application.
 /build-demo.mjs
