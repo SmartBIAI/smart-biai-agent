@@ -16,6 +16,8 @@ import { createImageJobs } from './image-jobs.mjs';
 import { createLiveJobs, migrateLive } from './live-jobs.mjs';
 import { webAccess } from './web-access.mjs';
 import { createWebSessions } from './web-sessions.mjs';
+import { accountTagScope, createAccountTags } from './account-tags.mjs';
+import { validateAccountFilters } from './web/account-properties.js';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
 const access = webAccess(process.env);
@@ -67,6 +69,22 @@ const saveSetting = database.prepare('INSERT OR REPLACE INTO settings (name, val
 const generationDelay = 1800;
 const publishDelay = 3800;
 const lateWindow = 15 * 60 * 1000;
+const accountTags = createAccountTags(database);
+
+function tagScope(mode) { return accountTagScope(mode, mode === 'live' ? configuration('social').appId : ''); }
+function tagWriteScope(mode, body) {
+  const scope = tagScope(mode);
+  if (body.scope !== scope) fail(409, '账号连接或运行模式已变化，请刷新后再维护标签。');
+  return scope;
+}
+async function queryAccounts(mode, filters = {}) {
+  validateAccountFilters(filters);
+  const config = mode === 'live' ? configuration('social') : null;
+  const scope = accountTagScope(mode, config?.appId || '');
+  const platform = filters.platforms?.length === 1 ? filters.platforms[0] : filters.platform;
+  const result = mode === 'live' ? await socialClient(config).accounts({ id: filters.id, platform }) : { accounts, limited: false };
+  return { ...result, accounts: accountTags.filter(scope, result.accounts, filters) };
+}
 
 function advanceJobs(now = Date.now()) {
   const ready = database.prepare("SELECT id FROM generation WHERE mode = 'mock' AND source_id IS NULL AND created <= ?").all(now - generationDelay);
@@ -489,12 +507,12 @@ const imageJobs = createImageJobs(database, {
 async function bootstrap(mode) {
   const settings = Object.fromEntries(Object.keys(groups).map(name => [name, settingView(name)]));
   settings.storage = storageView();
-  if (mode === 'mock') return { mode, version: appVersion, agent: {enabled:true,semantic:false}, accounts, models, imageModels, settings, issues: {} };
-  const [social, video, image] = await Promise.allSettled([Promise.resolve().then(() => socialClient(configuration('social')).accounts()), liveModels(), liveImageModels()]);
+  if (mode === 'mock') return { mode, version: appVersion, agent: {enabled:true,semantic:false}, accounts: accountTags.enrich(tagScope(mode), accounts), accountTags: accountTags.snapshot(tagScope(mode)), models, imageModels, settings, issues: {} };
+  const [social, video, image] = await Promise.allSettled([queryAccounts(mode), liveModels(), liveImageModels()]);
   const found = social.status === 'fulfilled' ? social.value.accounts : [];
   const catalog = video.status === 'fulfilled' ? video.value : [];
   return {
-    mode, version: appVersion, agent: {enabled:true,semantic:true}, accounts: found, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
+    mode, version: appVersion, agent: {enabled:true,semantic:true}, accounts: found, accountTags: settings.social.appId ? accountTags.snapshot(tagScope(mode)) : { scope: '', tags: [], assignments: {}, revisions: {} }, models: catalog, imageModels: image.status === 'fulfilled' ? image.value : [], settings,
     issues: {
       social: social.status === 'rejected' ? social.reason.message : social.value.limited ? '当前已加载前 500 个账号，可在 Agent 按账号 ID 或平台查询。' : '',
       video: video.status === 'rejected' ? video.reason.message : catalog.length ? '' : '已连接生成服务，请在 Smart BIAI 开通视频模型。',
@@ -524,7 +542,7 @@ async function agent(body, mode) {
   let limited;
   if (intent.query || intent.publish && (intent.accountId || intent.keyword || intent.platform || intent.country)) {
     try {
-      const result = await socialClient(configuration('social')).accounts({
+      const result = await queryAccounts(mode, {
         id: intent.accountId, keyword: intent.keyword, platform: intent.platform, country: intent.country
       });
       found = result.accounts;
@@ -567,11 +585,7 @@ async function conversationAgent(body, mode) {
     if(last?.type!=='user'||last.text?.trim()!==message||fileIds.some(fileId=>!last.files?.some(file=>file.id===fileId)))fail(409,'本条消息尚未保存到当前对话，请重新发送。');
     const recent=database.prepare('SELECT data FROM agent_turn WHERE mode=? AND conversation_id=? ORDER BY created DESC LIMIT 3').all(mode,conversationId).map(row=>JSON.parse(row.data));
     const zone=readSetting('preferences').zone||'Asia/Shanghai';
-    const accountQuery=async(filters={})=>{
-      if(mode==='live')return socialClient(configuration('social')).accounts(filters);
-      const aliases={US:'美国',GB:'英国',UK:'英国'};
-      return {accounts:accounts.filter(item=>(!filters.id||item.id===filters.id)&&(!filters.platform||item.platform===filters.platform)&&(!filters.country||item.country===(aliases[String(filters.country).toUpperCase()]||filters.country))&&(!filters.keyword||`${item.name} ${item.alias}`.toLowerCase().includes(filters.keyword.toLowerCase()))),limited:false};
-    };
+    const accountQuery=filters=>queryAccounts(mode,filters);
     const resource=async(kind,targetId,refresh=false)=>{
       validId(targetId);
       let result;
@@ -601,6 +615,7 @@ async function conversationAgent(body, mode) {
       list:kind=>kind==='image'?imageJobs.list(mode):kind==='video'?database.prepare('SELECT * FROM generation WHERE mode=? ORDER BY created DESC').all(mode).map(row=>generationView(row,mode)):database.prepare('SELECT * FROM publication WHERE mode=? ORDER BY created DESC').all(mode).map(publicationView),
       file:async fileId=>{const file=await getUpload(fileId);return {id:file.id,name:file.name,size:file.size,type:mediaTypes[extname(file.name).toLowerCase()][0]};},
       accounts:accountQuery,
+      accountTags:async()=>accountTags.snapshot(tagScope(mode)).tags,
       quote:(kind,parameters)=>kind==='image'?imageJobs.quote(parameters,mode):estimate(parameters,mode),
       outputUrl:url=>mode==='mock'?new URL(url,'https://demo.invalid/').href:url
     });
@@ -638,7 +653,7 @@ async function conversationAgent(body, mode) {
 async function estimate(body, mode) {
   if (mode === 'mock') return { parameters: generationParameters(body, models, false), credits: mockCredits(body) };
   const id = validId(body.id);
-  if (getGeneration.get(id)) fail(409, '该草稿已有生成任务，请查看生成记录。');
+  if (getGeneration.get(id)) fail(409, '该草稿已有生成任务，请查看视频生成任务。');
   const connection = configuration('video');
   const catalog = await liveModels(connection);
   if (!catalog.length) fail(422, '当前应用没有可用的视频模型，请在 Smart BIAI 开通视频模型。');
@@ -744,6 +759,7 @@ async function api(request, path) {
     if (path === '/api/conversations') return database.prepare('SELECT id, title, revision, updated FROM conversation WHERE mode = ? ORDER BY updated DESC').all(mode);
     if (conversation) return conversationView(database.prepare('SELECT * FROM conversation WHERE mode = ? AND id = ?').get(mode, validId(conversation[1])));
     if (path === '/api/bootstrap') return bootstrap(mode);
+    if (path === '/api/account-tags') return accountTags.snapshot(tagScope(mode));
     if (path === '/api/images') return imageJobs.list(mode);
     if (/^\/api\/images\/[a-f\d-]+$/i.test(path)) return imageJobs.get(path.split('/').at(-1), mode);
     if (path === '/api/generations') return database.prepare('SELECT * FROM generation WHERE mode = ? ORDER BY created DESC').all(mode).map(row => generationView(row, mode));
@@ -752,6 +768,9 @@ async function api(request, path) {
   }
   if (method === 'POST') {
     const body = await readBody(request, conversation ? 2_000_000 : undefined);
+    if (path === '/api/account-tags') return accountTags.save(tagWriteScope(mode, body), body);
+    if (path === '/api/account-tags/delete') return accountTags.remove(tagWriteScope(mode, body), body);
+    if (path === '/api/account-tags/assign') return accountTags.assign(tagWriteScope(mode, body), body);
     if (conversation) return saveConversation(mode, validId(conversation[1]), body);
     if (path === '/api/settings/storage') return configureStorage(body);
     if (path === '/api/agent') return agent(body, mode);
@@ -794,7 +813,9 @@ const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/styles.css', ['styles.css', 'text/css']],
-  ['/generation-models.js', ['../generation-models.js', 'text/javascript']]
+  ['/generation-models.js', ['../generation-models.js', 'text/javascript']],
+  ['/account-properties.js', ['account-properties.js', 'text/javascript']],
+  ['/account-tag-controls.js', ['account-tag-controls.js', 'text/javascript']]
 ]);
 const demoAssets = new Set(['/demo-assets/sample-video.mp4', '/demo-assets/sample-cover.jpg']);
 const loginAssets = new Map([

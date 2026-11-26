@@ -9,6 +9,7 @@
 !media-storage.mjs
 !web-access.mjs
 !web-sessions.mjs
+!account-tags.mjs
 !image-jobs.mjs
 !generation-models.js
 !agent.mjs
@@ -17,6 +18,8 @@
 !web/
 !web/index.html
 !web/app.js
+!web/account-properties.js
+!web/account-tag-controls.js
 !web/styles.css
 !web/login.html
 !web/login.js

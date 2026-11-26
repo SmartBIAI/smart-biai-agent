@@ -1,4 +1,6 @@
 import { normalizeGenerationIntent } from './generation-models.js';
+import { accountCountry } from './account-properties.js';
+import { createAccountTagControls } from './account-tag-controls.js';
 
 const icons = {
   image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
@@ -47,6 +49,15 @@ const state = {
   history: [], conversation: null, historyBusy: false
 };
 const modeSelect = document.querySelector('#run-mode');
+const accountTagControls = createAccountTagControls({ document, request, notify, getMode: () => state.mode, getAccounts: () => state.accounts,
+  changed: ({ reset = false, clearSearch = false, metadata = false } = {}) => {
+    if (clearSearch) { state.accountSearch = ''; const search = document.querySelector('#account-search'); if (search) search.value = ''; }
+    if (state.page === 'accounts') {
+      if (metadata) { const filters = document.querySelector('#account-filter-controls'); if (filters) filters.innerHTML = accountTagControls.filtersHTML(); }
+      updateAccounts({ reset });
+    }
+  }
+});
 const generationPolls = new Map();
 let conversationDirty = false;
 let conversationTimer;
@@ -266,6 +277,7 @@ function navigate() {
     state.accountFilter = '';
     state.accountSearch = '';
     state.accountCountry = '';
+    accountTagControls.resetFilters();
   }
   navigation.innerHTML = Object.entries(pages).map(([key, label]) => `<a href="#${key}"${key === state.page ? ' aria-current="page"' : ''}>${icon(key)}<span>${label}</span></a>`).join('');
   document.querySelector('#breadcrumb').textContent = pages[state.page];
@@ -473,7 +485,7 @@ function renderChat() {
       if (!task) return assistant('<p>这条发布任务暂不可查看。</p>');
       return assistant(`<div class="confirmed"><span class="confirmed-icon">${icon('check')}</span><div><strong>${task.planned ? '已确认排期' : '已确认发布'}</strong><p>${esc(task.title)} · ${esc(taskAccount(task)?.name)}${task.planned ? ` · ${dateFormat(task.planned, task.zone)} ${zoneLabels[task.zone] ?? esc(task.zone)}` : ''}</p></div><a class="button" href="#tasks/${task.id}">查看任务 ${icon('arrow', 15)}</a></div>`);
     }
-    return assistant(`<p>${esc(entry.text)}</p>${entry.mediaChoice ? entry.mediaChoice.chosen ? `<p class="field-note">已选择生成${entry.mediaChoice.chosen === 'image' ? '图片' : '视频'}</p>` : `<div class="detail-actions"><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="image">${icon('image')} 生成图片</button><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="video">${icon('video')} 生成视频</button></div>` : ''}${renderAgentTargets(entry.targets)}${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片记录</a>' : ''}`);
+    return assistant(`<p>${esc(entry.text)}</p>${entry.mediaChoice ? entry.mediaChoice.chosen ? `<p class="field-note">已选择生成${entry.mediaChoice.chosen === 'image' ? '图片' : '视频'}</p>` : `<div class="detail-actions"><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="image">${icon('image')} 生成图片</button><button class="button" data-action="choose-media" data-id="${esc(entry.mediaChoice.id)}" data-media-type="video">${icon('video')} 生成视频</button></div>` : ''}${renderAgentTargets(entry.targets)}${entry.accounts?.length ? accountCards(entry.accounts) : ''}${entry.videos ? recentVideos(true, entry.intent) : ''}${entry.images ? '<a class="text-button" href="#tasks/images">查看图片生成任务</a>' : ''}`);
   }).join('') + (state.intentBusy ? assistant('<p class="muted">正在处理你的请求…</p>') : '');
   box.scrollTop = box.scrollHeight;
   if(state.agentPending)setAgentPending(true);
@@ -484,7 +496,7 @@ function assistant(content) {
 }
 
 function accountCards(accounts) {
-  return `<div class="account-cards">${accounts.map(account => `<a class="account-card" href="#accounts/${esc(account.id)}">${platformIcon(account.platform)}<span><strong>${esc(account.name)}</strong><small>${esc(account.platform)} · ${esc(account.country)} · ID ${esc(account.id)}</small></span>${badge(account.authorization, account.authorization === '已授权' ? 'green' : 'orange')}${icon('arrow', 15)}</a>`).join('')}</div>`;
+  return `<div class="account-cards">${accounts.map(account => `<a class="account-card" href="#accounts/${esc(account.id)}">${platformIcon(account.platform)}<span><strong>${esc(account.name)}</strong><small>${esc(account.platform)} · ${esc(accountCountry(account).label)} · ID ${esc(account.id)}</small><span class="account-tag-list">${accountTagControls.tagsFor(account).map(tag => `<span class="account-tag tag-${esc(tag.color)}">${esc(tag.name)}</span>`).join('')}</span></span>${badge(account.authorization, account.authorization === '已授权' ? 'green' : 'orange')}${icon('arrow', 15)}</a>`).join('')}</div>`;
 }
 
 function recentVideos(showMany = false, intent = {}) {
@@ -624,7 +636,7 @@ function renderPublicationDraft(draft) {
   return `<form class="inner-card publish-form" data-id="${draft.id}" data-form="publication">
     <div class="card-header"><span class="card-icon">${icon('tasks')}</span><div><h3>发布确认</h3><p>检查发布账号、标题和时间。</p></div>${badge(live ? '将发布到所选账号' : '待确认', live ? 'orange' : 'purple')}</div>
     <div class="draft-media">${thumbnail(video?.coverUrl)}<span><strong>已选生成视频</strong><small>视频可用至 ${dateFormat(video?.expiresAt, draft.zone)}</small></span></div>
-    <label>目标账号<select name="accountId" required><option value="">请选择目标账号</option>${state.accounts.filter(mayPublish).map(item => `<option value="${item.id}"${selected(item.id, draft.accountId)}>${esc(item.platform)} · ${esc(item.name)}</option>`).join('')}</select></label>
+    <label>目标账号<select name="accountId" required><option value="">请选择目标账号</option>${state.accounts.filter(mayPublish).map(item => `<option value="${item.id}"${selected(item.id, draft.accountId)}>${esc(item.platform)} · ${esc(item.name)} · ${esc(accountCountry(item).label)}${accountTagControls.tagsFor(item).length ? ' · ' + esc(accountTagControls.tagsFor(item).map(tag => tag.name).join(' / ')) : ''}</option>`).join('')}</select></label>
     <label><span class="field-heading">发布标题 <button class="text-button" type="button" data-action="fill-title">AI 补齐</button></span><input name="title" maxlength="100" required placeholder="输入发布标题" value="${esc(draft.title)}"></label>
     <label data-description${account?.platform === 'YouTube' ? '' : ' hidden'}>视频描述<textarea name="description" rows="2" maxlength="1000" placeholder="可选">${esc(draft.description)}</textarea></label>
     <p class="field-note">封面 · ${video?.coverUrl ? '使用生成服务返回的封面' : '自动使用生成封面，无封面时留空'}</p>
@@ -642,19 +654,8 @@ function thumbnail(url) {
 }
 
 const listBatchSize = 20;
-const countryNames = new Intl.DisplayNames(['zh-CN'], { type: 'region' });
-const countryAliases = { 美国: 'US', 英国: 'GB', 日本: 'JP', 德国: 'DE', 法国: 'FR', 中国: 'CN', 加拿大: 'CA', 澳大利亚: 'AU', UK: 'GB', USA: 'US', GBR: 'GB' };
-function accountCountry(account) {
-  const raw = String(account.country || '').trim();
-  if (!raw) return { value: '__unknown__', label: '未设置国家' };
-  const code = countryAliases[raw] || countryAliases[raw.toUpperCase()] || (/^[a-z]{2}$/i.test(raw) ? raw.toUpperCase() : '');
-  return { value: code || raw, label: code ? `${countryNames.of(code)}（${code}）` : raw };
-}
-
 function matchingAccounts() {
-  return state.accounts.filter(account => (!state.accountFilter || state.accountFilter === account.platform) &&
-    (!state.accountCountry || state.accountCountry === accountCountry(account).value) &&
-    `${account.id} ${account.name} ${account.alias}`.toLowerCase().includes(state.accountSearch.trim().toLowerCase()));
+  return state.accounts.filter(account => accountTagControls.matches(account, state.accountSearch.trim()));
 }
 
 function accountWorks() {
@@ -690,14 +691,11 @@ function renderAccounts() {
   state.accountRows = listBatchSize;
   state.workRows = listBatchSize;
   state.worksAccountId = '';
-  const countries = [...new Map(state.accounts.map(account => { const country = accountCountry(account); return [country.value, country]; })).values()]
-    .sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
   main.innerHTML = `<section class="page accounts-page">
-    ${heading('社媒账号', '查看已连接的海外社媒账号及其发布作品。')}
+    <div class="account-page-heading">${heading('社媒账号', '按平台、国家和自定义标签管理账号及发布作品。')}<button type="button" class="button" data-tag-action="manage">管理标签</button></div>
     ${state.issues.social ? `<p class="page-issue">${esc(state.issues.social)} <a href="#settings">连接设置</a></p>` : ''}
     <div class="account-layout"><div class="panel account-panel"><div class="toolbar"><label class="search">${icon('search', 17)}<input id="account-search" aria-label="搜索账号" placeholder="搜索账号名称、别名或 ID" value="${esc(state.accountSearch)}"></label>
-      <select id="account-filter" aria-label="筛选平台"><option value="">全部平台</option>${['TikTok', 'YouTube', 'Instagram'].map(platform => `<option${selected(platform, state.accountFilter)}>${platform}</option>`).join('')}</select>
-      <select id="account-country" aria-label="筛选国家"><option value="">全部国家</option>${countries.map(country => `<option value="${esc(country.value)}"${selected(country.value, state.accountCountry)}>${esc(country.label)}</option>`).join('')}</select></div><div id="account-table" class="account-scroll" tabindex="0" role="region" aria-label="社媒账号列表"></div></div><aside id="account-detail" class="panel account-detail"></aside></div>
+      <div id="account-filter-controls" class="account-filter-controls">${accountTagControls.filtersHTML()}</div></div>${accountTagControls.batchHTML()}<div id="account-table" class="account-scroll" tabindex="0" role="region" aria-label="社媒账号列表"></div></div><aside id="account-detail" class="panel account-detail"></aside></div>
   </section>`;
   const selectedIndex = matchingAccounts().findIndex(account => account.id === state.accountId);
   if (selectedIndex >= listBatchSize) state.accountRows = Math.ceil((selectedIndex + 1) / listBatchSize) * listBatchSize;
@@ -706,7 +704,7 @@ function renderAccounts() {
 }
 
 function updateAccounts({ reset = false } = {}) {
-  if (reset) { state.accountRows = listBatchSize; state.workRows = listBatchSize; state.worksAccountId = ''; state.accountId = ''; }
+  if (reset) { state.accountRows = listBatchSize; state.workRows = listBatchSize; state.worksAccountId = ''; state.accountId = ''; accountTagControls.clearSelection(); }
   const list = matchingAccounts();
   const account = list.find(item => item.id === state.accountId) ?? list[0];
   state.accountId = account?.id ?? '';
@@ -720,6 +718,7 @@ function updateAccounts({ reset = false } = {}) {
   const works = accountWorks();
   detail.innerHTML = `<div class="account-summary">${platformIcon(account.platform)}<div><h2>${esc(account.name)}</h2><p>${esc(account.platform)} · 账号 ID ${account.id}</p></div></div>
     <div class="account-meta"><span>服务到期 <strong>${esc(account.expiry || '—')}</strong></span>${badge(account.authorization, account.authorization === '已授权' ? 'green' : 'orange')}</div>
+    ${accountTagControls.detailHTML(account)}
     <div class="section-label">本应用发布作品 <span>${works.length}</span></div><p class="field-note">显示通过本应用确认发布成功的作品。</p>
     <div id="account-works" class="works account-scroll" tabindex="0" role="region" aria-label="账号作品列表"></div>`;
   renderAccountWorks(works);
@@ -730,7 +729,8 @@ function renderAccountRows(list = matchingAccounts(), reset = false) {
   const container = document.querySelector('#account-table');
   const scrollTop = reset ? 0 : container.scrollTop;
   const visible = list.slice(0, state.accountRows);
-  container.innerHTML = list.length ? `<table><thead><tr><th>账号</th><th>平台</th><th>国家</th><th>授权状态</th></tr></thead><tbody>${visible.map(item => `<tr${item.id === state.accountId ? ' class="selected-row"' : ''}><td><button class="row-link" data-action="account" data-id="${esc(item.id)}">${platformIcon(item.platform)}<span><strong>${esc(item.name)}</strong><small>${esc(item.alias)}</small></span></button></td><td>${esc(item.platform)}</td><td>${esc(accountCountry(item).label)}</td><td>${badge(item.authorization, item.authorization === '已授权' ? 'green' : 'orange')}</td></tr>`).join('')}</tbody></table>${batchFooter(visible.length, list.length, 'accounts')}` : empty('没有匹配的账号', '试试其他国家、平台、名称或 ID。');
+  container.innerHTML = list.length ? `<table class="account-table"><thead><tr><th class="account-select-cell"><input type="checkbox" data-select-accounts aria-label="选择已加载账号"></th><th>账号</th><th>平台</th><th>国家</th><th>标签</th><th>授权状态</th></tr></thead><tbody>${visible.map(item => `<tr${item.id === state.accountId ? ' class="selected-row"' : ''}><td class="account-select-cell">${accountTagControls.selectionHTML(item.id)}</td><td><button class="row-link" data-action="account" data-id="${esc(item.id)}">${platformIcon(item.platform)}<span><strong>${esc(item.name)}</strong><small>${esc(item.alias)}</small></span></button></td><td data-account-platform>${esc(item.platform)}</td><td data-account-country>${esc(accountCountry(item).label)}</td><td class="account-tags-cell">${accountTagControls.badges(item)}</td><td>${badge(item.authorization, item.authorization === '已授权' ? 'green' : 'orange')}</td></tr>`).join('')}</tbody></table>${batchFooter(visible.length, list.length, 'accounts')}` : empty('没有匹配的账号', '试试其他国家、平台、标签、名称或 ID。');
+  accountTagControls.syncDOM(visible);
   container.scrollTop = scrollTop;
   fillListPanel('account-table', 'accounts');
 }
@@ -760,7 +760,7 @@ function empty(title, detail, symbol = 'search') {
   return `<div class="empty"><span class="card-icon">${icon(symbol, 22)}</span><strong>${title}</strong><p>${detail}</p></div>`;
 }
 
-const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '生成记录', image: '图片记录' };
+const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '视频生成任务', image: '图片生成任务' };
 
 function taskRecords() {
   if (state.taskTab === 'image') return state.images;
@@ -789,7 +789,7 @@ function renderTasks() {
 function renderTaskTable(content, count, total, reset) {
   const table = document.querySelector('#task-table');
   const scrollTop = reset ? 0 : table.scrollTop;
-  table.setAttribute('aria-label', state.taskTab === 'image' ? '图片记录列表' : state.taskTab === 'generation' ? '视频生成记录列表' : '发布任务列表');
+  table.setAttribute('aria-label', state.taskTab === 'image' ? '图片生成任务列表' : state.taskTab === 'generation' ? '视频生成任务列表' : '发布任务列表');
   table.innerHTML = content + (total ? batchFooter(count, total, 'tasks') : '');
   table.scrollTop = scrollTop;
   fillListPanel('task-table', 'tasks');
@@ -809,12 +809,12 @@ function updateTasks({ reset = false } = {}) {
   const visible = rows.slice(0, state.taskRows);
   if (state.taskTab === 'image') {
     detail.hidden = true;
-    renderTaskTable(rows.length ? `<table><thead><tr><th>图片任务</th><th>生成模型</th><th>张数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(task => `<tr><td><div class="task-work">${thumbnail(task.results.find(item => item.url)?.url)}<strong>${esc(task.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(imageModelName(task))}</td><td>${task.parameters.n}</td><td>${dateFormat(task.created)}</td><td>${imageBadge(task)}${generationError(task.error || task.results.find(item => item.error)?.error, true)}</td><td><button class="text-button" data-action="open-image-result" data-id="${esc(task.id)}">查看图片</button></td></tr>`).join('')}</tbody></table>` : empty('还没有图片生成记录', '在 BIAI Agent 描述你想生成的图片。', 'image'), visible.length, rows.length, reset);
+    renderTaskTable(rows.length ? `<table><thead><tr><th>图片任务</th><th>生成模型</th><th>张数</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(task => `<tr><td><div class="task-work">${thumbnail(task.results.find(item => item.url)?.url)}<strong>${esc(task.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(imageModelName(task))}</td><td>${task.parameters.n}</td><td>${dateFormat(task.created)}</td><td>${imageBadge(task)}${generationError(task.error || task.results.find(item => item.error)?.error, true)}</td><td><button class="text-button" data-action="open-image-result" data-id="${esc(task.id)}">查看图片</button></td></tr>`).join('')}</tbody></table>` : empty('还没有图片生成任务', '在 BIAI Agent 描述你想生成的图片。', 'image'), visible.length, rows.length, reset);
     return;
   }
   if (state.taskTab === 'generation') {
     detail.hidden = true;
-    renderTaskTable(rows.length ? `<table><thead><tr><th>生成任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${durationLabel(video.parameters.duration)}</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}${generationError(video.error, true)}</td><td><button class="text-button" data-action="preview-video" data-id="${esc(video.id)}">查看视频</button></td></tr>`).join('')}</tbody></table>` : empty('还没有生成记录', '在 BIAI Agent 发起视频生成。', 'video'), visible.length, rows.length, reset);
+    renderTaskTable(rows.length ? `<table><thead><tr><th>视频任务</th><th>生成模型</th><th>时长</th><th>创建时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(video => `<tr><td><div class="task-work">${thumbnail(video.coverUrl)}<strong>${esc(video.parameters.prompt.slice(0, 70))}</strong></div></td><td>${esc(modelName(video))}</td><td>${durationLabel(video.parameters.duration)}</td><td>${dateFormat(video.created)}</td><td>${generationBadge(video)}${generationError(video.error, true)}</td><td><button class="text-button" data-action="preview-video" data-id="${esc(video.id)}">查看视频</button></td></tr>`).join('')}</tbody></table>` : empty('还没有视频生成任务', '在 BIAI Agent 发起视频生成。', 'video'), visible.length, rows.length, reset);
     return;
   }
   renderTaskTable(rows.length ? `<table><thead><tr><th>作品</th><th>目标账号</th><th>预约时间</th><th>状态</th><th>操作</th></tr></thead><tbody>${visible.map(item => {
@@ -985,7 +985,7 @@ async function sendMessage(message, { mediaType, referenceFiles, understood, cho
       chat.push({ type: 'generation', id });
     } else if (intent.imageQuery) {
       state.images = await request('images');
-      textEntry(state.images.length ? `已有 ${state.images.length} 组图片生成记录。` : '还没有图片生成记录，可以描述你想创作的产品图、海报或封面。', { images: Boolean(state.images.length) });
+      textEntry(state.images.length ? `已有 ${state.images.length} 组图片生成任务。` : '还没有图片生成任务，可以描述你想创作的产品图、海报或封面。', { images: Boolean(state.images.length) });
     } else if (intent.taskQuery) {
       const tasks = await request('publications');
       if (state.chat !== chat) return;
@@ -1171,6 +1171,7 @@ async function submitForm(form, clearSecret = false) {
       if (state.mode === 'live' && !['preferences', 'storage'].includes(name)) {
         const updated = await request('bootstrap');
         Object.assign(state, updated);
+        accountTagControls.setData(updated.accountTags);
       }
       if (state.page === 'settings') {
         const other = Array.from(main.querySelectorAll('[data-form="settings"]')).filter(item => item !== form)
@@ -1284,8 +1285,6 @@ main.addEventListener('change', event => {
   const { target } = event;
   if (target.id === 'attachment-files') void uploadAttachments(target);
   if (target.id === 'conversation-history' && target.value) void changeConversation(target.value);
-  if (target.id === 'account-filter') { state.accountFilter = target.value; updateAccounts({ reset: true }); }
-  if (target.id === 'account-country') { state.accountCountry = target.value; updateAccounts({ reset: true }); }
   if (target.id === 'task-account') { state.taskAccount = target.value; updateTasks({ reset: true }); }
   if (target.form?.dataset.id) changeDraft(target.form, target);
   if (target.name === 'provider') {
@@ -1489,6 +1488,7 @@ async function loadMode() {
   try {
     const [boot, conversations] = await Promise.all([request('bootstrap'), request('conversations'), sync()]);
     Object.assign(state, boot);
+    accountTagControls.setData(boot.accountTags);
     const logout = document.querySelector('#logout');
     if (logout) { logout.hidden = !boot.access?.required; logout.title = boot.access?.username ? `当前账号：${boot.access.username}` : ''; }
     state.history = conversations;
@@ -1504,7 +1504,7 @@ async function loadMode() {
 
 modeSelect.addEventListener('change', async () => {
   const nextMode = modeSelect.value;
-  if (state.intentBusy || state.formBusy || state.historyBusy || state.uploadBusy) {
+  if (state.intentBusy || state.formBusy || state.historyBusy || state.uploadBusy || accountTagControls.isBusy()) {
     modeSelect.value = state.mode;
     notify('请等待当前请求完成后再切换。');
     return;

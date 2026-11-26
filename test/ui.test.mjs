@@ -5,18 +5,29 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { createMockRequest } from './helpers/mock-api.mjs';
 import { normalizeGenerationIntent } from '../generation-models.js';
+import { accountCountry } from '../web/account-properties.js';
+import { createAccountTagControls } from '../web/account-tag-controls.js';
+import { accountTagScope, createAccountTags } from '../account-tags.mjs';
+import { DatabaseSync } from 'node:sqlite';
+import { accounts as defaultAccounts } from '../mock.mjs';
 
 async function until(check, label) {
   for (let index = 0; index < 150; index++) { const result = check(); if (result) return result; await wait(20); }
   throw new Error(`Timed out: ${label}`);
 }
 
-async function app({ agentReply, initialAccounts, initialPublications, initialGenerations, initialImages, initialConversations, agentPlanner, agentEnabled } = {}) {
+async function app({ agentReply, initialAccounts, initialPublications, initialGenerations, initialImages, initialConversations, agentPlanner, agentEnabled, initialTags } = {}) {
   const { window } = new JSDOM('', { url: 'https://example.com/agent/', runScripts: 'outside-only', pretendToBeVisual: true });
   window.HTMLDialogElement.prototype.showModal ||= function () { this.open = true; };
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
   window.HTMLElement.prototype.scrollTo ||= function () {};
   window.normalizeGenerationIntent = normalizeGenerationIntent;
+  Object.assign(window, { accountCountry, createAccountTagControls });
+  const tagDb = new DatabaseSync(':memory:');
+  tagDb.exec('PRAGMA foreign_keys=ON');
+  const tagStore = createAccountTags(tagDb), scope = accountTagScope('mock');
+  tagStore.remember(scope, initialAccounts || defaultAccounts);
+  if (initialTags) initialTags(tagStore, scope);
   let clock = Date.now();
   window.Date.now = () => clock;
   const requests = [];
@@ -28,9 +39,12 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
     const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
     requests.push({ path, body });
     try {
-      let data = path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
+      let data = path === 'account-tags' ? body ? tagStore.save(scope, body) : tagStore.snapshot(scope) :
+        path === 'account-tags/assign' ? tagStore.assign(scope, body) : path === 'account-tags/delete' ? tagStore.remove(scope, body) :
+        path === 'files' ? { id: 'ff5a283c-aec3-4c8e-828f-4146cde85334', name: body.name, size: body.size } : path === 'agent' && agentReply ? agentReply : await request(path, body);
       if (path === 'bootstrap' && initialAccounts) data = { ...data, accounts: initialAccounts };
       if (path === 'bootstrap' && agentEnabled) data = { ...data, agent:{enabled:true} };
+      if (path === 'bootstrap') data = { ...data, accountTags: tagStore.snapshot(scope) };
       if (path === 'publications' && !body && initialPublications) data = structuredClone(initialPublications);
       if (path === 'generations' && !body && initialGenerations) data = structuredClone(initialGenerations);
       if (path === 'images' && !body && initialImages) data = structuredClone(initialImages);
@@ -42,9 +56,11 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
   window.document.write(html);
   const source = (await readFile(new URL('../web/app.js', import.meta.url), 'utf8'))
     .replace("import { normalizeGenerationIntent } from './generation-models.js';", '')
+    .replace("import { accountCountry } from './account-properties.js';", '')
+    .replace("import { createAccountTagControls } from './account-tag-controls.js';", '')
     .replaceAll('import.meta.url', JSON.stringify('https://example.com/agent/app.js'));
   await window.eval(`(async () => { ${source}\n })()`);
-  return { window, document: window.document, requests, advance: (milliseconds = 20000) => { clock += milliseconds; },
+  return { window, document: window.document, requests, tagStore, tagScope: scope, advance: (milliseconds = 20000) => { clock += milliseconds; },
     change(element, value) { element.value = value; element.dispatchEvent(new window.Event('change', { bubbles: true })); },
     submit(form) { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); },
     async attach() {
@@ -53,7 +69,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
       input.dispatchEvent(new window.Event('change', {bubbles:true}));
       await until(() => window.document.querySelector('#attached .attachment-chip'), 'uploaded reference');
     },
-    async close() { await wait(20); window.close(); } };
+    async close() { await wait(20); window.close(); tagDb.close(); } };
 }
 
 test('Agent image form supports model switching, explicit confirmation, preview and history', async () => {
@@ -204,7 +220,7 @@ function scrollBottom(ui, container) {
 async function accountPage() {
   const ui = await app({ initialAccounts: manyAccounts, initialPublications: manyWorks });
   ui.window.location.hash = '#accounts';
-  await until(() => ui.document.querySelector('#account-country'), 'accounts page');
+  await until(() => ui.document.querySelector('[data-account-filter="countries"]'), 'accounts page');
   return ui;
 }
 
@@ -235,27 +251,117 @@ test('account and work lists independently add 20 rows on scroll and reset works
 test('country, platform and search filters combine across the whole loaded account catalog and restart at 20', async () => {
   const ui = await accountPage(); const {document} = ui;
   try {
-    const country = document.querySelector('#account-country');
-    assert.equal([...country.options].filter(option => option.value==='US').length,1);
-    assert.ok([...country.options].some(option => option.value==='__unknown__'));
-    ui.change(country,'US');
+    const country = document.querySelector('[data-account-filter="countries"][value="US"]');
+    assert.equal(document.querySelectorAll('[data-account-filter="countries"][value="US"]').length,1);
+    assert.ok(document.querySelector('[data-account-filter="countries"][value="__unknown__"]'));
+    country.click();
     let left = document.querySelector('#account-table');
     assert.equal(left.querySelectorAll('tbody tr').length,20); assert.ok(left.textContent.includes('20 / 45'));
-    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.children[2].textContent==='美国（US）'));
+    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.querySelector('[data-account-country]').textContent==='美国（US）'));
     left.querySelector('[data-action="load-account-list"]').click();
     assert.equal(left.querySelectorAll('tbody tr').length,40);
-    ui.change(document.querySelector('#account-filter'),'YouTube');
+    document.querySelector('[data-account-filter="platforms"][value="YouTube"]').click();
     assert.equal(left.querySelectorAll('tbody tr').length,20); assert.equal(left.scrollTop,0);
-    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.children[1].textContent==='YouTube'));
+    assert.ok([...left.querySelectorAll('tbody tr')].every(row => row.querySelector('[data-account-platform]').textContent==='YouTube'));
     const search = document.querySelector('#account-search'); search.value='Brand 43'; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
     assert.equal(left.querySelectorAll('tbody tr').length,1); assert.ok(left.textContent.includes('品牌43'));
     search.value='missing'; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
     assert.equal(left.querySelectorAll('tbody tr').length,0); assert.ok(document.querySelector('#account-detail').textContent.includes('选择社媒账号'));
     search.value=''; search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
-    ui.change(document.querySelector('#account-filter'),''); ui.change(country,'__unknown__');
+    document.querySelector('[data-tag-action="clear-filters"]').click(); document.querySelector('[data-account-filter="countries"][value="__unknown__"]').click();
     assert.equal(left.querySelectorAll('tbody tr').length,5); assert.ok(left.textContent.includes('品牌64'));
     assert.ok(document.querySelector('#account-works').textContent.includes('尚无发布作品'));
   } finally { await ui.close(); }
+});
+
+test('account tags combine multi-platform/country filters, any/all matching, untagged selection and loaded-row bulk changes', async () => {
+  const catalog = [
+    { id:'101',name:'美国主号',platform:'TikTok',country:'美国',authStatus:20,authorization:'已授权' },
+    { id:'102',name:'美国主页',platform:'Facebook',country:'USA',authStatus:10,authorization:'未授权' },
+    { id:'103',name:'日本账号',platform:'Instagram',country:'JP',authStatus:20,authorization:'已授权' },
+    { id:'104',name:'印尼频道',platform:'YouTube',country:'印尼',authStatus:20,authorization:'已授权' }
+  ];
+  let brand, priority;
+  const ui = await app({ initialAccounts:catalog, initialTags(store,scope) {
+    brand=store.save(scope,{name:'品牌A',color:'blue'}).tagId;
+    priority=store.save(scope,{name:'重点运营',color:'purple'}).tagId;
+    store.assign(scope,{accountIds:['101','102'],tagIds:[brand],action:'add'});
+    store.assign(scope,{accountIds:['101','103'],tagIds:[priority],action:'add'});
+  }});
+  const {document}=ui, ids=()=>[...document.querySelectorAll('#account-table [data-select-account]')].map(input=>input.dataset.selectAccount);
+  try {
+    ui.window.location.hash='#accounts';await until(()=>document.querySelector('[data-account-filter="tags"]'),'tagged account page');
+    document.querySelector('[data-account-filter="platforms"][value="TikTok"]').click();
+    document.querySelector('[data-account-filter="platforms"][value="Facebook"]').click();
+    document.querySelector('[data-account-filter="countries"][value="US"]').click();
+    assert.deepEqual(ids(),['101','102']);
+    document.querySelector('[data-tag-action="clear-filters"]').click();
+    document.querySelector(`[data-account-filter="tags"][value="${brand}"]`).click();
+    document.querySelector(`[data-account-filter="tags"][value="${priority}"]`).click();
+    assert.deepEqual(ids(),['101','102','103']);
+    ui.change(document.querySelector('[data-tag-match]'),'all');assert.deepEqual(ids(),['101']);
+    document.querySelector('[data-untagged]').click();assert.deepEqual(ids(),['104']);
+    assert.equal(document.querySelectorAll('[data-account-filter="tags"]:checked').length,0);
+    document.querySelector('[data-tag-action="clear-filters"]').click();
+    document.querySelector('[data-select-accounts]').click();
+    assert.match(document.querySelector('[data-selection-count]').textContent,/4/);
+    document.querySelector('[data-tag-action="bulk-add"]').click();
+    await until(()=>document.querySelector('#account-tags-dialog[open] [data-tag-form="assign"]'),'bulk tag editor');
+    document.querySelector(`#account-tags-dialog input[name="tag"][value="${brand}"]`).click();
+    ui.submit(document.querySelector('#account-tags-dialog [data-tag-form="assign"]'));
+    await until(()=>!document.querySelector('#account-tags-dialog').open,'bulk addition complete');
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).tags.find(tag=>tag.id===brand).count,4);
+    assert.ok(ui.tagStore.snapshot(ui.tagScope).assignments['103'].includes(priority));
+    assert.match(document.querySelector('#account-table').textContent,/未授权/,'local tags do not grant authorization');
+    document.querySelector('[data-tag-action="bulk-remove"]').click();
+    await until(()=>document.querySelector('#account-tags-dialog[open] [data-tag-form="assign"]'),'bulk removal editor');
+    document.querySelector(`#account-tags-dialog input[name="tag"][value="${brand}"]`).click();
+    ui.submit(document.querySelector('#account-tags-dialog [data-tag-form="assign"]'));
+    await until(()=>!document.querySelector('#account-tags-dialog').open,'bulk removal complete');
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).tags.find(tag=>tag.id===brand).count,0);
+    assert.ok(ui.tagStore.snapshot(ui.tagScope).assignments['103'].includes(priority));
+    document.querySelector('[data-account-filter="countries"][value="JP"]').click();
+    assert.equal(document.querySelector('#account-batch-bar').hidden,true,'filter changes clear selection');
+    assert.ok(!ui.requests.some(request=>['images','generations','publications'].includes(request.path)&&request.body),'tag edits never submit generation or publishing');
+  } finally {await ui.close();}
+});
+
+test('tag manager creates, renames and confirms deletion while account edits stage quick-created tags until save', async () => {
+  const ui=await app();const {document}=ui;
+  const dialog=()=>document.querySelector('#account-tags-dialog');
+  try {
+    ui.window.location.hash='#accounts';await until(()=>document.querySelector('[data-tag-action="manage"]'),'accounts');
+    document.querySelector('[data-tag-action="manage"]').click();
+    await until(()=>dialog().open,'manager');
+    let form=dialog().querySelector('[data-tag-form="save-tag"]');
+    form.elements.name.value=' Brand Ａ ';form.elements.color.value='blue';ui.submit(form);
+    await until(()=>dialog().querySelector('.tag-manager-row'),'created tag');
+    let tag=ui.tagStore.snapshot(ui.tagScope).tags[0];assert.equal(tag.name,'Brand A');
+    assert.ok(document.querySelector(`[data-account-filter="tags"][value="${tag.id}"]`),'new tag is immediately filterable');
+    dialog().querySelector('[data-tag-action="rename"]').click();
+    form=dialog().querySelector('[data-tag-form="save-tag"]');form.elements.name.value='重点运营';ui.submit(form);
+    await until(()=>dialog().querySelector('.tag-manager-row')?.textContent.includes('重点运营'),'renamed tag');
+    dialog().querySelector('[data-tag-action="close"]').click();
+    document.querySelector('[data-tag-action="edit-account"]').click();
+    await until(()=>dialog().open&&dialog().querySelector('[data-tag-form="assign"]'),'account editor');
+    dialog().querySelector(`input[name="tag"][value="${tag.id}"]`).click();
+    form=dialog().querySelector('[data-tag-form="quick-create"]');form.elements.name.value='新品';ui.submit(form);
+    await until(()=>dialog().querySelectorAll('input[name="tag"]').length===2&&!dialog().querySelector('[data-tag-form="assign"] button[type="submit"]').disabled,'quick-created tag');
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).assignments['101'],undefined,'creation alone does not assign the tag');
+    ui.submit(dialog().querySelector('[data-tag-form="assign"]'));
+    await until(()=>!dialog().open,'account labels saved');
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).assignments['101'].length,2);
+    assert.match(document.querySelector('.account-detail-tags').textContent,/重点运营/);
+    assert.match(document.querySelector('.account-detail-tags').textContent,/新品/);
+    document.querySelector('[data-tag-action="manage"]').click();await until(()=>dialog().open,'reopened manager');
+    dialog().querySelector(`[data-tag-action="delete"][data-tag-id="${tag.id}"]`).click();
+    assert.match(dialog().textContent,/关联 1 个账号/);
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).tags.length,2,'deletion waits for confirmation');
+    dialog().querySelector('[data-tag-action="confirm-delete"]').click();
+    await until(()=>dialog().querySelectorAll('.tag-manager-row').length===1,'tag removed');
+    assert.equal(ui.tagStore.snapshot(ui.tagScope).assignments['101'].length,1);
+    assert.doesNotMatch(document.querySelector('.account-detail-tags').textContent,/重点运营/);
+  } finally {await ui.close();}
 });
 
 function taskFixtures() {

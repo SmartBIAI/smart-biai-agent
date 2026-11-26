@@ -1,11 +1,14 @@
 import { imageParameters, videoParameters, validateVideoReferences } from './generation-models.js';
 
+import { validateAccountFilters } from './web/account-properties.js';
+
 export const agentProtocol = 'agent.v1';
 export const agentTools = [
   { name: 'get_task', description: '读取当前会话中指定任务或草稿的真实状态、完整参数与附件。refresh 为 true 时仅查询原任务，不重新提交。show 为 true 时向用户展示记录。', arguments: { target: '{kind: image|video|publication|draft, id: string}', refresh: 'boolean?', show: 'boolean?' } },
   { name: 'list_tasks', description: '查询任务或当前对话草稿。默认仅当前会话；用户明确要求查找其他任务记录时可用 workspace。结果将成为本会话可引用的对象。', arguments: { kind: 'image|video|publication|draft', scope: 'conversation|workspace?', status: 'string?', offset: 'integer?', limit: '1..20?' } },
   { name: 'list_models', description: '读取当前应用授权模型及各模型参数、参考素材能力。必须使用目录中的准确 ID，不猜测模型授权。', arguments: { kind: 'image|video' } },
-  { name: 'list_accounts', description: '查询社媒账号及实际授权状态，支持组合筛选。', arguments: { platform: 'string?', country: 'string?', keyword: 'string?', id: 'string?' } },
+  { name: 'list_account_tags', description: '查询当前应用的本地账号标签名称、ID和关联账号数。标签用于分类，不代表授权或发布权限。', arguments: {} },
+  { name: 'list_accounts', description: '查询社媒账号及实际授权状态。平台、国家、标签之间同时满足，平台或国家多选时匹配任一。标签支持任一/全部，名称不确定时先查 list_account_tags。仅查询本地标签，不修改账号。', arguments: { platform: 'string?', country: 'string?', platforms: 'string[]?', countries: 'string[]?', tags: 'string[]? 标签名称或ID', tagMatch: 'any|all?', untagged: 'boolean?', keyword: 'string?', id: 'string?' } },
   { name: 'prepare_generation', description: '新建或修改图片/视频草稿并获取新报价，不提交生成。source 指定继承的任务或草稿；changes 只放用户想改的字段。原附件默认继承，可 append/replace/clear。outputs 可把已完成任务的结果作为参考。', arguments: { kind: 'image|video', source: '{kind,id}?', changes: '{model?,prompt?,n?,size?,quality?,ratio?,resolution?,duration?,audio?}', attachments: '{mode: inherit|append|replace|clear, ids?: string[], maskId?: string|null}?', outputs: '[{target:{kind:image|video,id},index?:integer,role?:string}]?' } },
   { name: 'quote_draft', description: '为现有生成草稿重新获取报价。确认费用和参数后，用户仍须点击卡片确认生成。', arguments: { target: '{kind:draft,id}' } },
   { name: 'prepare_publication', description: '为已完成视频准备或修改发布草稿，不提交发布。source 为视频、原发布记录或未确认发布草稿。已确认且待发布的任务不能直接修改或另建重复发布。', arguments: { source: '{kind:video|publication|draft,id}', changes: '{accountId?,title?,description?,ai?,mode?:now|scheduled,zone?:IANA,planned?:YYYY-MM-DDTHH:mm}' } },
@@ -19,7 +22,7 @@ export const agentInstructions = `你是 Smart BIAI 的多轮任务 Agent。理�
 任务生成中、审核中或受理状态不明时，先查询原任务，不能以重试为由另建一次。只有已明确结束的任务才能用作重试来源。保留原失败或成功记录；已确认生成的参数不能修改，新尝试会创建新草稿。
 所有生成和发布都必须经卡片确认。工具只能读信息、准备草稿或报价，不能直接提交、确认、取消、删除任务，不能改变配置或读取密钥。不要声称草稿已经生成或发布；调用 prepare 后应明确要求用户检查卡片、费用和参数。
 prepare_generation 会按新模型能力校验参数并尝试新报价。附件数量、蒙版等不兼容时不要擅自舍弃，请用户决定。参数已由工具调整时说明调整。不要编造图像内容、可用下载链接、账号或执行结果。附件只有类型和名称，图片内容由生成服务结合原素材处理。
-发布目标只能是实际授权账号；账号缺失可以先准备待选择草稿，禁止猜选。时间使用 context.now 与 context.zone；预约有歧义时询问。已确认的发布任务不能假装已修改。操作范围之外的请求应说明能力。
+发布目标只能是实际授权账号；账号缺失可以先准备待选择草稿，禁止猜选。本地账号标签可结合平台、国家筛选；先查询标签目录以使用准确名称或ID，标签不表示账号授权，不可根据标签推定发布权限。工具只能读取标签，标签的添加、编辑、删除在社媒账号页完成。时间使用 context.now 与 context.zone；预约有歧义时询问。已确认的发布任务不能假装已修改。操作范围之外的请求应说明能力。
 每次读取工具结果后，依据结果继续、修正计划或询问用户；不要无意义重复失败调用。respond.memory 可简要保留尚未完成目标、用户约束和明确时间，便于后续接续。`;
 
 const clone = value => structuredClone(value);
@@ -313,7 +316,7 @@ export async function runConversationAgent(input, dependencies) {
   }
   const history = chat.slice(-28).map(entry => entry.type === 'user' || entry.type === 'text' ? {
     role:entry.type === 'user' ? 'user' : 'assistant',text:bounded(entry.text,2000),files:entry.files?.map(file=>({id:file.id,name:file.name,type:file.type})),
-    targets:entry.targets,accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus})),accountTotal:entry.accounts?.length
+    targets:entry.targets,accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus,tags:item.tags?.map(tag=>({id:tag.id,name:tag.name}))})),accountTotal:entry.accounts?.length
   } : {role:'assistant',type:entry.type,id:entry.id,ids:entry.ids});
   async function execute(call) {
     const args = call.arguments || {};
@@ -334,7 +337,8 @@ export async function runConversationAgent(input, dependencies) {
       if (results.length) chat.push({type:'text',text:`找到 ${rows.length} 条${args.kind==='image'?'图片':args.kind==='video'?'视频':args.kind==='draft'?'草稿':'发布'}记录。`,targets:results.map(({kind,id,...item})=>({kind,id,label:item.title||item.prompt||id,status:item.status}))});
       return {results,total:rows.length,nextOffset:offset+limit<rows.length?offset+limit:null};
     }
-    if (call.tool === 'list_accounts') { if(Object.keys(args).some(name=>!['id','platform','country','keyword'].includes(name))||Object.values(args).some(value=>typeof value!=='string'||value.length>100))throw failure('账号查询字段不受支持。');const result=await dependencies.accounts(args); for(const account of result.accounts)touched.accounts.set(account.id,account);chat.push({type:'text',text:`找到 ${result.accounts.length} 个匹配账号。${result.limited?'已达查询上限，可按账号 ID 缩小范围。':''}`,accounts:result.accounts});return result; }
+    if (call.tool === 'list_account_tags') { if(Object.keys(args).length)throw failure('标签目录查询无需参数。');return {tags:await dependencies.accountTags?.()||[]}; }
+    if (call.tool === 'list_accounts') { validateAccountFilters(args);const result=await dependencies.accounts(args); for(const account of result.accounts)touched.accounts.set(account.id,account);chat.push({type:'text',text:`找到 ${result.accounts.length} 个匹配账号。${result.limited?'当前只查询了部分账号，可按账号 ID 或平台缩小范围。':''}`,accounts:result.accounts});return result; }
     if (call.tool === 'prepare_generation') return prepareGeneration(args);
     if (call.tool === 'prepare_publication') return preparePublication(args);
     if (call.tool === 'quote_draft') { const ref=target(args.target);if(ref.kind!=='draft')throw failure('请选择未确认草稿。');const draft=await read(ref);const result=await quote(draft);drafts.set(draft.id,draft);changed.add(draft.id);presentDraft(draftKind(draft),draft.id);inspected.set(key(ref),{ref,item:draft});return result; }
