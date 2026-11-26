@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -109,7 +110,57 @@ test('subpath login serves assets, authorizes cookies and logs out without a bro
   assert.equal((await fetch(`${url}/`, { headers: auth })).status, 200);
   const bootstrap = await fetch(`${url}/api/bootstrap`, { headers: auth });
   assert.equal(bootstrap.status, 200);
-  assert.deepEqual((await bootstrap.json()).access, { required: true, username });
+  const boot = await bootstrap.json();
+  assert.deepEqual(boot.access, { required: true, username });
+  const api = async (path, body, status = 200) => {
+    const response = await fetch(`${url}/api/${path}`, {
+      headers: { ...auth, Origin: origin, 'Content-Type': 'application/json' },
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {})
+    });
+    const result = await response.json();
+    assert.equal(response.status, status, result.error);
+    return result;
+  };
+  const utc = offset => new Date(Date.now() + offset * 60_000).toISOString().slice(0, 16);
+  const model = boot.models[0];
+  const rule = await api('automation/save', { name: '审核后发布', zone: 'UTC', startsAt: utc(5), frequency: 'once',
+    policy: 'review', publishAt: utc(15).slice(11), accountId: boot.accounts[0].id, title: '产品视频', maxCredits: 1000,
+    video: { model: model.id, prompt: '细节展示：一只白色陶瓷杯缓慢旋转。', ratio: model.ratios[0],
+      resolution: model.resolutions[0], duration: model.durations?.[0] ?? model.min, audio: false } });
+  assert.equal(rule.enabled, false);
+  assert.equal((await api('automation')).runs.length, 0);
+  const execution = await api('automation/manage', { id: rule.id, action: 'run', revision: rule.revision });
+  await api('automation/manage', { id: rule.id, action: 'run', revision: rule.revision }, 409);
+  const runPath = `automation/runs/${execution.id}`;
+  async function untilRun(check) {
+    for (let attempt = 0; attempt < 90; attempt++) {
+      const run = await api(runPath);
+      if (check(run)) return run;
+      if (['failed','missed'].includes(run.status)) assert.fail(run.error);
+      await wait(100);
+    }
+    assert.fail('automation execution timed out');
+  }
+  await untilRun(run => run.reviewable);
+  assert.equal((await api('publications')).length, 0);
+  const draftId = randomUUID(), draftMessage = '新建自动化任务';
+  await api(`conversations/${draftId}`, { revision: 0, chat: [{ type: 'user', text: draftMessage }], drafts: [] });
+  const draft = await api('agent', { protocol: 'agent.v1', turnId: randomUUID(), conversationId: draftId, revision: 1, message: draftMessage,
+    command: { tool: 'prepare_automation', arguments: { action: 'create', changes: { name: 'Agent 规则草稿', policy: 'auto' } } } });
+  assert.equal(draft.conversation.chat.find(entry => entry.automation)?.automation.proposal.name, 'Agent 规则草稿');
+  assert.equal((await api('automation')).rules.length, 1, 'the agent proposal does not save or enable a rule');
+  const conversationId = randomUUID(), message = '查看自动化任务';
+  await api(`conversations/${conversationId}`, { revision: 0, chat: [{ type: 'user', text: message }], drafts: [] });
+  const response = await api('agent', { protocol: 'agent.v1', turnId: randomUUID(), conversationId, revision: 1, message,
+    command: { tool: 'list_automations', arguments: { reviewOnly: true } } });
+  assert.equal(response.conversation.chat.find(entry => entry.automation)?.automation.runs[0].id, execution.id);
+  assert.equal((await api('publications')).length, 0);
+  await api('automation/review', { id: execution.id, action: 'approve', title: '确认后的标题' });
+  const scheduled = await untilRun(run => run.status === 'scheduled');
+  const [publication] = await api('publications');
+  assert.equal(publication.id, scheduled.publicationId);
+  assert.equal(publication.title, '确认后的标题');
+  assert.equal((await fetch(`${url}/automation.js`, { headers: auth })).status, 200);
   const basic = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   assert.equal((await fetch(`${url}/api/bootstrap`, { headers: basic })).status, 200);
   assert.equal((await fetch(`${url}/api/bootstrap`, { headers: { ...basic, 'Sec-Fetch-Site': 'same-origin' } })).status, 401);
@@ -117,4 +168,5 @@ test('subpath login serves assets, authorizes cookies and logs out without a bro
   assert.equal(logout.status, 200);
   assert.match(logout.headers.get('set-cookie'), /Max-Age=0/);
   assert.equal((await fetch(`${url}/api/bootstrap`, { headers: auth })).status, 401);
+  assert.equal((await fetch(`${url}/api/automation`, { headers: auth })).status, 401);
 });

@@ -6,6 +6,7 @@ export function mockAgentPlanner(message, command) {
   return async ({ observations }) => {
     if (observations.length) {
       const last = observations.at(-1);
+      if (last.ok && last.tool === 'prepare_automation') return { calls: [{ tool: 'respond', arguments: { text: '请打开任务卡片，查看并确认设置。' } }] };
       return {calls:[{tool:'respond',arguments:{text:last.ok ? last.result?.requiresConfirmation ? '草稿已准备，请检查参数、附件和报价后确认。' : '已查询演示数据。' : last.error}}]};
     }
     if (command) return {calls:[command]};

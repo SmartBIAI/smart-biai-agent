@@ -7,6 +7,7 @@ import { createMockRequest } from './helpers/mock-api.mjs';
 import { normalizeGenerationIntent } from '../generation-models.js';
 import { accountCountry } from '../web/account-properties.js';
 import { createAccountTagControls } from '../web/account-tag-controls.js';
+import { createAutomationControls } from '../web/automation.js';
 import { accountTagScope, createAccountTags } from '../account-tags.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { accounts as defaultAccounts } from '../mock.mjs';
@@ -22,7 +23,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
   window.HTMLDialogElement.prototype.close ||= function () { this.open = false; this.dispatchEvent(new window.Event('close')); };
   window.HTMLElement.prototype.scrollTo ||= function () {};
   window.normalizeGenerationIntent = normalizeGenerationIntent;
-  Object.assign(window, { accountCountry, createAccountTagControls });
+  Object.assign(window, { accountCountry, createAccountTagControls, createAutomationControls });
   const tagDb = new DatabaseSync(':memory:');
   tagDb.exec('PRAGMA foreign_keys=ON');
   const tagStore = createAccountTags(tagDb), scope = accountTagScope('mock');
@@ -58,6 +59,7 @@ async function app({ agentReply, initialAccounts, initialPublications, initialGe
     .replace("import { normalizeGenerationIntent } from './generation-models.js';", '')
     .replace("import { accountCountry } from './account-properties.js';", '')
     .replace("import { createAccountTagControls } from './account-tag-controls.js';", '')
+    .replace("import { createAutomationControls } from './automation.js';", '')
     .replaceAll('import.meta.url', JSON.stringify('https://example.com/agent/app.js'));
   await window.eval(`(async () => { ${source}\n })()`);
   return { window, document: window.document, requests, tagStore, tagScope: scope, advance: (milliseconds = 20000) => { clock += milliseconds; },

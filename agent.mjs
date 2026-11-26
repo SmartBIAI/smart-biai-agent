@@ -8,6 +8,8 @@ export const agentTools = [
   { name: 'list_tasks', description: '查询任务或当前对话草稿。默认仅当前会话；用户明确要求查找其他任务记录时可用 workspace。结果将成为本会话可引用的对象。', arguments: { kind: 'image|video|publication|draft', scope: 'conversation|workspace?', status: 'string?', offset: 'integer?', limit: '1..20?' } },
   { name: 'list_models', description: '读取当前应用授权模型及各模型参数、参考素材能力。必须使用目录中的准确 ID，不猜测模型授权。', arguments: { kind: 'image|video' } },
   { name: 'list_account_tags', description: '查询当前应用的本地账号标签名称、ID和关联账号数。标签用于分类，不代表授权或发布权限。', arguments: {} },
+  { name: 'list_automations', description: '查看自动化任务规则及执行进度，可按规则名或ID筛选，可只查看待审核任务。', arguments: { keyword: 'string?', ruleId: 'string?', reviewOnly: 'boolean?' } },
+  { name: 'prepare_automation', description: '准备自动化任务卡片。create 为新建草稿，edit 为规则修改草稿，enable/pause/run 为启用/暂停/立即执行一次的确认入口，review 为审核入口。修改或操作已有规则时先查规则，审核时先查执行记录。仅准备卡片，用户须自行保存或确认。', arguments: { action: 'create|edit|enable|pause|run|review', ruleId: 'string?', runId: 'string?', changes: '{name?,zone?,startsAt?:YYYY-MM-DDTHH:mm,frequency?:once|daily|weekly,publishAt?:HH:mm,policy?:review|auto,accountId?,title?,description?,maxCredits?:integer,video?:{model?,prompt?,ratio?,resolution?,duration?,audio?}}?' } },
   { name: 'list_accounts', description: '查询社媒账号及实际授权状态。平台、国家、标签之间同时满足，平台或国家多选时匹配任一。标签支持任一/全部，名称不确定时先查 list_account_tags。仅查询本地标签，不修改账号。', arguments: { platform: 'string?', country: 'string?', platforms: 'string[]?', countries: 'string[]?', tags: 'string[]? 标签名称或ID', tagMatch: 'any|all?', untagged: 'boolean?', keyword: 'string?', id: 'string?' } },
   { name: 'prepare_generation', description: '新建或修改图片/视频草稿并获取新报价，不提交生成。source 指定继承的任务或草稿；changes 只放用户想改的字段。原附件默认继承，可 append/replace/clear。outputs 可把已完成任务的结果作为参考。', arguments: { kind: 'image|video', source: '{kind,id}?', changes: '{model?,prompt?,n?,size?,quality?,ratio?,resolution?,duration?,audio?}', attachments: '{mode: inherit|append|replace|clear, ids?: string[], maskId?: string|null}?', outputs: '[{target:{kind:image|video,id},index?:integer,role?:string}]?' } },
   { name: 'quote_draft', description: '为现有生成草稿重新获取报价。确认费用和参数后，用户仍须点击卡片确认生成。', arguments: { target: '{kind:draft,id}' } },
@@ -23,6 +25,7 @@ export const agentInstructions = `你是 Smart BIAI 的多轮任务 Agent。理�
 所有生成和发布都必须经卡片确认。工具只能读信息、准备草稿或报价，不能直接提交、确认、取消、删除任务，不能改变配置或读取密钥。不要声称草稿已经生成或发布；调用 prepare 后应明确要求用户检查卡片、费用和参数。
 prepare_generation 会按新模型能力校验参数并尝试新报价。附件数量、蒙版等不兼容时不要擅自舍弃，请用户决定。参数已由工具调整时说明调整。不要编造图像内容、可用下载链接、账号或执行结果。附件只有类型和名称，图片内容由生成服务结合原素材处理。
 发布目标只能是实际授权账号；账号缺失可以先准备待选择草稿，禁止猜选。本地账号标签可结合平台、国家筛选；先查询标签目录以使用准确名称或ID，标签不表示账号授权，不可根据标签推定发布权限。工具只能读取标签，标签的添加、编辑、删除在社媒账号页完成。时间使用 context.now 与 context.zone；预约有歧义时询问。已确认的发布任务不能假装已修改。操作范围之外的请求应说明能力。
+周期性或按规则自动生成与发布使用 list_automations 和 prepare_automation，单次已有视频发布仍使用 prepare_publication。准备自动化草稿时只填用户已明确的信息，留待用户在表单补齐其他字段。启用自动发布规则与运行规则均需用户在界面确认；人工审核规则须逐条确认后安排发布。管理规则和查看执行记录时先查询真实数据，多个目标时请用户选择。
 每次读取工具结果后，依据结果继续、修正计划或询问用户；不要无意义重复失败调用。respond.memory 可简要保留尚未完成目标、用户约束和明确时间，便于后续接续。`;
 
 const clone = value => structuredClone(value);
@@ -316,7 +319,7 @@ export async function runConversationAgent(input, dependencies) {
   }
   const history = chat.slice(-28).map(entry => entry.type === 'user' || entry.type === 'text' ? {
     role:entry.type === 'user' ? 'user' : 'assistant',text:bounded(entry.text,2000),files:entry.files?.map(file=>({id:file.id,name:file.name,type:file.type})),
-    targets:entry.targets,accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus,tags:item.tags?.map(tag=>({id:tag.id,name:tag.name}))})),accountTotal:entry.accounts?.length
+    targets:entry.targets,automation:entry.automation,accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus,tags:item.tags?.map(tag=>({id:tag.id,name:tag.name}))})),accountTotal:entry.accounts?.length
   } : {role:'assistant',type:entry.type,id:entry.id,ids:entry.ids});
   async function execute(call) {
     const args = call.arguments || {};
@@ -338,6 +341,12 @@ export async function runConversationAgent(input, dependencies) {
       return {results,total:rows.length,nextOffset:offset+limit<rows.length?offset+limit:null};
     }
     if (call.tool === 'list_account_tags') { if(Object.keys(args).length)throw failure('标签目录查询无需参数。');return {tags:await dependencies.accountTags?.()||[]}; }
+    if (['list_automations', 'prepare_automation'].includes(call.tool)) {
+      if (!dependencies.automation) throw failure('当前环境暂未接入自动化任务。');
+      const result = await dependencies.automation(call.tool, args);
+      chat.push({ type: 'text', text: result.text, automation: result.card });
+      return { ...result.card, requiresConfirmation: call.tool === 'prepare_automation' };
+    }
     if (call.tool === 'list_accounts') { validateAccountFilters(args);const result=await dependencies.accounts(args); for(const account of result.accounts)touched.accounts.set(account.id,account);chat.push({type:'text',text:`找到 ${result.accounts.length} 个匹配账号。${result.limited?'当前只查询了部分账号，可按账号 ID 或平台缩小范围。':''}`,accounts:result.accounts});return result; }
     if (call.tool === 'prepare_generation') return prepareGeneration(args);
     if (call.tool === 'prepare_publication') return preparePublication(args);
@@ -361,7 +370,7 @@ export async function runConversationAgent(input, dependencies) {
       if(clock()-started>90000){timedOut=true;break;}
       if (call?.tool==='respond') { if(plan.calls.length!==1){observations.push({tool:'respond',ok:false,error:'请读取本轮工具结果后单独回复，不得预先声称成功。'});continue;}finalText=bounded(call.arguments?.text,2000);if(typeof call.arguments?.memory==='string')nextMemory=call.arguments.memory.slice(0,2000);if(!finalText)observations.push({ok:false,error:'回复内容不能为空。'});continue; }
       try {
-        const reusable=['prepare_generation','prepare_publication'].includes(call?.tool)&&call.arguments?.source?.kind!=='draft';
+        const reusable=['prepare_generation','prepare_publication','prepare_automation','list_automations'].includes(call?.tool)&&call.arguments?.source?.kind!=='draft';
         const signature=reusable?JSON.stringify(canonical(call)):null;
         const result=signature&&mutations.has(signature)?mutations.get(signature):await execute(call || {});
         if(signature)mutations.set(signature,result);

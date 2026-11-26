@@ -17,6 +17,7 @@ import { createLiveJobs, migrateLive } from './live-jobs.mjs';
 import { webAccess } from './web-access.mjs';
 import { createWebSessions } from './web-sessions.mjs';
 import { accountTagScope, createAccountTags } from './account-tags.mjs';
+import { createAutomation } from './automation.mjs';
 import { validateAccountFilters } from './web/account-properties.js';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
@@ -282,7 +283,7 @@ function timezone(value) {
   catch { fail(400, '请选择有效的时区。'); }
 }
 
-async function createPublication(body, mode) {
+async function createPublication(body, mode, beforeInsert) {
   const id = validId(body.id);
   const generationId = validId(body.generationId);
   const generation = getGeneration.get(generationId);
@@ -317,6 +318,7 @@ async function createPublication(body, mode) {
   if (live && generation.state !== 'completed' || generation.expires !== null && generation.expires <= (planned ?? now)) {
     fail(400, '这个视频在所选时间无法使用，请调整预约时间或更换视频。');
   }
+  beforeInsert?.();
   database.prepare(`INSERT INTO publication
     (id, generation_id, account, title, description, cover, ai, planned, zone, status, created, updated, mode, scope, video_scope, account_snapshot)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, generationId, account.id, title, description, cover, ai,
@@ -616,6 +618,7 @@ async function conversationAgent(body, mode) {
       file:async fileId=>{const file=await getUpload(fileId);return {id:file.id,name:file.name,size:file.size,type:mediaTypes[extname(file.name).toLowerCase()][0]};},
       accounts:accountQuery,
       accountTags:async()=>accountTags.snapshot(tagScope(mode)).tags,
+      automation:(tool, args)=>automationAgentCard(mode, tool, args),
       quote:(kind,parameters)=>kind==='image'?imageJobs.quote(parameters,mode):estimate(parameters,mode),
       outputUrl:url=>mode==='mock'?new URL(url,'https://demo.invalid/').href:url
     });
@@ -704,6 +707,74 @@ function createGeneration(body, mode) {
   return generationView(getGeneration.get(id), mode);
 }
 
+const automation = createAutomation(database, {
+  connection: mode => {
+    if (mode === 'mock') return 'mock';
+    const video = configuration('video'), social = configuration('social');
+    if (!video.ready || !social.ready) fail(422, '请先配置视频生成和社媒连接。');
+    return [video.scope, social.scope];
+  },
+  parameters: async (video, mode) => {
+    if (!video || typeof video !== 'object' || Array.isArray(video)) fail(400, '请填写视频生成参数。');
+    const { model, prompt, ratio, resolution, duration, audio } = video;
+    return videoParameters({ model, prompt, ratio, resolution, duration, audio }, mode === 'mock' ? models : await liveModels(), mode === 'live');
+  },
+  account: async (mode, id) => {
+    const account = mode === 'mock' ? accounts.find(item => item.id === id && item.authStatus === 20)
+      : (await socialClient(configuration('social')).accounts({ id })).accounts.find(item => item.id === id && item.canPublish);
+    if (!account) fail(422, '目标账号当前无法发布，请检查授权和服务有效期。');
+    return account;
+  },
+  video: (id, mode) => {
+    const row = getGeneration.get(id);
+    return row?.mode === mode ? generationView(row, mode) : null;
+  },
+  publication: (id, mode) => {
+    const row = getPublication.get(id);
+    return row?.mode === mode ? publicationView(row) : null;
+  },
+  quote: estimate, generate: createGeneration, publish: createPublication
+});
+
+function automationAgentCard(mode, tool, args) {
+  if (tool === 'list_automations') {
+    const keyword = validateText(args.keyword ?? '', 80, '规则名称', false).toLowerCase();
+    const data = automation.list(mode, args.ruleId ? validId(args.ruleId) : '');
+    const rules = data.rules.filter(rule => !keyword || rule.name.toLowerCase().includes(keyword));
+    const ids = new Set(rules.map(rule => rule.id));
+    const runs = data.runs.filter(run => ids.has(run.ruleId) && (!args.reviewOnly || run.reviewable));
+    return { text: `匹配 ${rules.length} 条规则，最近记录中有 ${runs.length} 次执行。`,
+      card: { kind: 'list', rules: rules.slice(0, 12).map(({ id, name, enabled, frequency, policy, nextAt, zone }) => ({ id, name, enabled, frequency, policy, nextAt, zone })),
+        runs: runs.slice(0, 12).map(({ id, ruleId, name, status, reviewable, scheduledAt, publishAt, error }) => ({ id, ruleId, name, status, reviewable, scheduledAt, publishAt, error })) } };
+  }
+  const action = args.action;
+  if (!['create', 'edit', 'enable', 'pause', 'run', 'review'].includes(action)) fail(400, '请选择支持的规则操作。');
+  if (action === 'review') {
+    const run = automation.run(mode, validId(args.runId));
+    if (!run.reviewable) fail(409, '该任务当前无需审核。');
+    return { text: '打开审核卡片可预览视频、检查文案并确认排期。', card: { kind: 'review', id: run.ruleId, runId: run.id, name: run.name } };
+  }
+  const rule = action === 'create' ? null : automation.rule(mode, validId(args.ruleId));
+  if (action === 'edit' && rule.enabled) fail(409, '请先暂停规则，再准备修改。');
+  if (action === 'create' || action === 'edit') {
+    const input = args.changes ?? {};
+    const proposal = {};
+    const fields = { name: 80, zone: 80, startsAt: 16, frequency: 10, publishAt: 5, policy: 10, accountId: 19, title: 100, description: 1000 };
+    for (const [field, max] of Object.entries(fields)) if (input[field] !== undefined) proposal[field] = validateText(input[field], max, field, false);
+    if (Number.isSafeInteger(input.maxCredits)) proposal.maxCredits = input.maxCredits;
+    if (input.video && typeof input.video === 'object') {
+      proposal.video = {};
+      for (const [field, max] of Object.entries({ model: 180, prompt: 20000, ratio: 16, resolution: 20 })) {
+        if (input.video[field] !== undefined) proposal.video[field] = validateText(input.video[field], max, field, false);
+      }
+      if (Number.isInteger(input.video.duration)) proposal.video.duration = input.video.duration;
+      if (typeof input.video.audio === 'boolean') proposal.video.audio = input.video.audio;
+    }
+    return { text: '规则草稿已准备。请打开草稿，检查并补齐设置后保存。', card: { kind: action, id: rule?.id, name: rule?.name, proposal } };
+  }
+  return { text: '请打开卡片检查规则，确认后执行此操作。', card: { kind: 'action', action, id: rule.id, name: rule.name } };
+}
+
 function conversationView(row) {
   if (!row) fail(404, '找不到这段对话。');
   const { content, ...summary } = row;
@@ -756,6 +827,11 @@ async function api(request, path) {
   if (!['mock', 'live'].includes(mode)) fail(400, '运行模式无效。');
   const conversation = path.match(/^\/api\/conversations\/([a-f\d-]+)$/i);
   if (method === 'GET') {
+    if (path === '/api/automation') return automation.list(mode);
+    const automationRule = path.match(/^\/api\/automation\/rules\/([a-f\d-]+)$/i);
+    if (automationRule) return automation.list(mode, validId(automationRule[1]));
+    const automationRun = path.match(/^\/api\/automation\/runs\/([a-f\d-]+)$/i);
+    if (automationRun) return automation.run(mode, validId(automationRun[1]));
     if (path === '/api/conversations') return database.prepare('SELECT id, title, revision, updated FROM conversation WHERE mode = ? ORDER BY updated DESC').all(mode);
     if (conversation) return conversationView(database.prepare('SELECT * FROM conversation WHERE mode = ? AND id = ?').get(mode, validId(conversation[1])));
     if (path === '/api/bootstrap') return bootstrap(mode);
@@ -768,6 +844,9 @@ async function api(request, path) {
   }
   if (method === 'POST') {
     const body = await readBody(request, conversation ? 2_000_000 : undefined);
+    if (path === '/api/automation/save') return automation.save(mode, { ...body, ...(body.id ? { id: validId(body.id) } : {}) });
+    if (path === '/api/automation/manage') return automation.manage(mode, { ...body, id: validId(body.id) });
+    if (path === '/api/automation/review') return automation.review(mode, { ...body, id: validId(body.id) });
     if (path === '/api/account-tags') return accountTags.save(tagWriteScope(mode, body), body);
     if (path === '/api/account-tags/delete') return accountTags.remove(tagWriteScope(mode, body), body);
     if (path === '/api/account-tags/assign') return accountTags.assign(tagWriteScope(mode, body), body);
@@ -815,7 +894,8 @@ const assets = new Map([
   ['/styles.css', ['styles.css', 'text/css']],
   ['/generation-models.js', ['../generation-models.js', 'text/javascript']],
   ['/account-properties.js', ['account-properties.js', 'text/javascript']],
-  ['/account-tag-controls.js', ['account-tag-controls.js', 'text/javascript']]
+  ['/account-tag-controls.js', ['account-tag-controls.js', 'text/javascript']],
+  ['/automation.js', ['automation.js', 'text/javascript']]
 ]);
 const demoAssets = new Set(['/demo-assets/sample-video.mp4', '/demo-assets/sample-cover.jpg']);
 const loginAssets = new Map([
@@ -935,4 +1015,5 @@ setInterval(() => {
   catch (error) { console.error('Worker update failed:', error.code || error.name); }
   void liveJobs.run().catch(error => console.error('Live Worker update failed:', error.code || error.name));
   void imageJobs.run().catch(error => console.error('Image Worker update failed:', error.code || error.name));
+  void automation.tick().catch(error => console.error('Automation Worker update failed:', error.code || error.name));
 }, 1000).unref();

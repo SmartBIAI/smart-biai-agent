@@ -10,6 +10,7 @@
 !web-access.mjs
 !web-sessions.mjs
 !account-tags.mjs
+!automation.mjs
 !image-jobs.mjs
 !generation-models.js
 !agent.mjs
@@ -20,6 +21,7 @@
 !web/app.js
 !web/account-properties.js
 !web/account-tag-controls.js
+!web/automation.js
 !web/styles.css
 !web/login.html
 !web/login.js

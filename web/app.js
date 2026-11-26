@@ -1,6 +1,7 @@
 import { normalizeGenerationIntent } from './generation-models.js';
 import { accountCountry } from './account-properties.js';
 import { createAccountTagControls } from './account-tag-controls.js';
+import { createAutomationControls } from './automation.js';
 
 const icons = {
   image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/>',
@@ -8,6 +9,7 @@ const icons = {
   agent: '<path d="M8 10h8m-8 4h5M6 20l3-3h8a4 4 0 0 0 4-4V8a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v5a4 4 0 0 0 3 4z"/>',
   accounts: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/>',
   tasks: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4m8-4v4M3 10h18m-13 5h3"/>',
+  automation: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2M7 2 4 5m13-3 3 3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M10 3h4l1 3 3 1 3 3v4l-3 3-3 1-1 3h-4l-1-3-3-1-3-3v-4l3-3 3-1z"/>',
   arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
   send: '<path d="M4 4l17 8-17 8 3-8-3-8zm3 8h14"/>',
@@ -25,7 +27,7 @@ const icons = {
 const icon = (name, size = 19) => `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linejoin="round" stroke-linecap="round">${icons[name]}</svg>`;
 const appPath = new URL('.', import.meta.url).pathname;
 const conversationKey = appPath === '/' ? 'biai' : `biai:${appPath}`;
-const pages = { agent: 'BIAI Agent', accounts: '社媒账号', tasks: '发布任务', settings: '连接设置' };
+const pages = { agent: 'BIAI Agent', accounts: '社媒账号', automation: '自动化任务', tasks: '发布任务', settings: '连接设置' };
 const main = document.querySelector('#main');
 const navigation = document.querySelector('#navigation');
 const videoDialog = document.querySelector('#video-dialog');
@@ -49,6 +51,21 @@ const state = {
   history: [], conversation: null, historyBusy: false
 };
 const modeSelect = document.querySelector('#run-mode');
+const automationControls = createAutomationControls({ document, main, request, notify, escape: esc, formatDate: dateFormat,
+  context: () => ({ page: state.page, mode: state.mode, accounts: state.accounts, models: state.models, zone: defaultZone(), chat: state.chat, mayPublish }),
+  preview: async id => {
+    const mode = state.mode;
+    try {
+      const video = findVideo(id) || await request(`generations/${id}`, undefined, mode);
+      if (mode !== state.mode) return;
+      upsert(state.generations, video);
+      videoDialog.dataset.videoId = id;
+      renderVideoDialog(video);
+      videoDialog.showModal();
+      if (!video.url && mode === 'live') void refreshDialogVideo();
+    } catch (error) { notify(error.message); }
+  }
+});
 const accountTagControls = createAccountTagControls({ document, request, notify, getMode: () => state.mode, getAccounts: () => state.accounts,
   changed: ({ reset = false, clearSearch = false, metadata = false } = {}) => {
     if (clearSearch) { state.accountSearch = ''; const search = document.querySelector('#account-search'); if (search) search.value = ''; }
@@ -282,6 +299,7 @@ function navigate() {
   navigation.innerHTML = Object.entries(pages).map(([key, label]) => `<a href="#${key}"${key === state.page ? ' aria-current="page"' : ''}>${icon(key)}<span>${label}</span></a>`).join('');
   document.querySelector('#breadcrumb').textContent = pages[state.page];
   if (!state.loaded) return;
+  if (state.page === 'automation') { automationControls.render(hash[1], hash[2]); return; }
   ({ agent: renderAgent, accounts: renderAccounts, tasks: renderTasks, settings: renderSettings })[state.page]();
 }
 
@@ -471,6 +489,7 @@ function renderChat() {
   }
   box.innerHTML = chatForDisplay().map(entry => {
     if (entry.type === 'user') return `<div class="message user"><div class="bubble">${esc(entry.text)}${attachmentList(entry.files)}</div><div class="avatar user-avatar">${icon('accounts', 17)}</div></div>`;
+    if (entry.automation) return assistant(`<p>${esc(entry.text)}</p>${automationControls.renderAgentCard(entry.automation, state.chat.indexOf(entry))}`);
     if (entry.type === 'generation') return assistant(renderGenerationDraft(state.drafts.get(entry.id)));
     if (entry.type === 'result') return assistant(resultCard(entry.id, entry.intent));
     if (entry.type === 'image-generation') return assistant(renderImageDraft(state.drafts.get(entry.id)));
@@ -910,6 +929,10 @@ async function applyAgentResponse(response) {
 async function sendMessage(message, { mediaType, referenceFiles, understood, choice, command } = {}) {
   const value = message.trim();
   if ((!value && !state.attachments.length) || state.intentBusy || state.historyBusy || state.uploadBusy || state.formBusy) return;
+  if (!command && state.mode === 'mock' && state.agent?.enabled) {
+    if (/^(查看|查询|列出|管理)(我的|全部)?自动化任务[。！？]?$/.test(value)) command = { tool: 'list_automations', arguments: {} };
+    if (/^(创建|新建)(一个)?自动化任务[。！？]?$/.test(value)) command = { tool: 'prepare_automation', arguments: { action: 'create' } };
+  }
   if (!semanticAgent() && !command && referenceFiles === undefined && !state.attachments.length && /^(?:生成)?(?:图片|图像|视频)$/.test(value)) {
     const pending = state.chat.at(-1);
     if (pending?.mediaChoice && !pending.mediaChoice.chosen) {
@@ -1477,6 +1500,7 @@ async function sync({ poll = false } = {}) {
 
 window.addEventListener('hashchange', navigate);
 async function loadMode() {
+  automationControls.close();
   if (imageDialog.open) imageDialog.close();
   if (videoDialog.open) videoDialog.close();
   modeSelect.disabled = true;
@@ -1504,7 +1528,7 @@ async function loadMode() {
 
 modeSelect.addEventListener('change', async () => {
   const nextMode = modeSelect.value;
-  if (state.intentBusy || state.formBusy || state.historyBusy || state.uploadBusy || accountTagControls.isBusy()) {
+  if (state.intentBusy || state.formBusy || state.historyBusy || state.uploadBusy || accountTagControls.isBusy() || automationControls.isBusy()) {
     modeSelect.value = state.mode;
     notify('请等待当前请求完成后再切换。');
     return;
@@ -1541,6 +1565,7 @@ window.addEventListener('pageshow', event => { if (event.persisted) void request
 
 await loadMode();
 const poll = async () => {
+  if (state.loaded && state.page === 'automation') void automationControls.refresh();
   if (state.loaded) try { await sync({ poll: true }); } catch { /* The next poll will reconnect to the local server. */ }
   setTimeout(poll, 1000);
 };
