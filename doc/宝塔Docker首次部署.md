@@ -16,7 +16,7 @@
 ```sh
 git clone https://github.com/SmartBIAI/smart-biai-agent.git
 cd smart-biai-agent
-docker build -t smart-biai-agent:0.3.4-docker.1 .
+docker build -t smart-biai-agent:0.3.5-docker.1 .
 cd deploy
 cp .env.example .env
 chmod 600 .env
@@ -137,7 +137,7 @@ fi
 ```sh
 cd ..
 git pull --ff-only
-docker build -t smart-biai-agent:0.3.4-docker.1 .
+docker build -t smart-biai-agent:0.3.5-docker.1 .
 cd deploy
 docker compose -f compose.yml up -d --force-recreate
 curl -fsS http://127.0.0.1:4178/healthz

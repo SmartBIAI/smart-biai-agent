@@ -1,6 +1,6 @@
 const frequencyLabels = { once: '单次', daily: '每天', weekly: '每周' };
 const statusLabels = {
-  pending: '等待生成', generating: '生成中', review: '待审核', release: '准备排期', scheduled: '已排期',
+  pending: '等待生成', generating: '生成中', review: '准备待审排期', release: '准备排期', awaiting_review: '已排期 · 待审核', scheduled: '已排期',
   queued: '等待发布', submitting: '正在发送', queued_upstream: '平台处理中', publishing: '发布中',
   completed: '发布完成', failed: '失败', expired: '素材已过期', missed: '已错过', rejected: '审核未通过',
   canceled: '已取消', unknown: '状态待确认'
@@ -50,9 +50,10 @@ export function createAutomationControls({ document, main, context, request, not
       <div class="detail-title"><h3>${esc(run.name)}</h3><span class="badge ${run.reviewable ? 'orange' : run.status === 'completed' ? 'green' : ['failed','expired','missed','rejected'].includes(run.status) ? 'red' : 'gray'}">${esc(status(run.status))}</span></div>
       <p>${esc(accountName(run.accountId))} · ${policy(run.policy)}${run.credits != null ? ` · ${esc(run.credits)} 积分报价` : ''}</p>
       <p>生成 ${esc(time(run.scheduledAt, run.zone))} · 计划发布 ${esc(time(run.publishAt, run.zone))}（${esc(run.zone)}）</p>
+      ${run.reviewable && run.publishAt <= Date.now() ? '<p class="field-note">原发布时间已过，请在审核时选择新的时间。</p>' : ''}
       ${run.error ? `<p class="form-error automation-error">${esc(run.error)}</p>` : ''}
       <div class="detail-actions">${run.generationId && run.videoStatus === 'completed' ? button('preview', '预览视频', run.id) : ''}
-      ${run.reviewable ? button('review', '审核并安排发布', run.id, 'primary') : ''}
+      ${run.reviewable ? button('review', '审核排期', run.id, 'primary') : ''}
       ${run.cancelable && !run.reviewable ? button('cancel', '取消本次任务', run.id) : ''}
       ${run.publicationId ? `<a class="text-button" href="#tasks/${encodeURIComponent(run.publicationId)}">查看发布任务</a>` : ''}</div>
     </article>`).join('') : '<p class="empty-note">生成、审核及发布进度会显示在这里。</p>';
@@ -163,19 +164,44 @@ export function createAutomationControls({ document, main, context, request, not
   function reviewRun(run) {
     if (!run.reviewable) { notify('此执行记录当前无需审核。'); return; }
     dialogData = { type: 'review', id: run.id, mode: context().mode };
-    show('审核视频并安排发布', `<form data-automation-form="review" class="automation-form">
+    show('审核视频与发布排期', `<form data-automation-form="review" class="automation-form">
       <h3>${esc(run.name)}</h3><p>${esc(accountName(run.accountId))} · 计划发布 ${esc(time(run.publishAt, run.zone))}（${esc(run.zone)}）</p>
       ${run.generationId && run.videoStatus === 'completed' ? `<div>${button('preview-review', '预览视频', run.generationId)}</div>` : ''}
       ${fields('title','发布标题','text',run.title,'required maxlength="100"')}
       <label>视频描述（可选）<textarea name="description" maxlength="1000" rows="2">${esc(run.description || '')}</textarea></label>
       ${fields('planned',`改期（${esc(run.zone)}，可选）`,'datetime-local','')}
-      <p class="field-note">留空沿用原发布时间。原时间已过时，请指定新的未来时间。</p>
+      <p class="field-note">通过审核后按排期发布。改期留空则沿用原时间，原时间已过时请选择新的未来时间。</p>
       <div class="dialog-actions"><button class="button" type="submit" name="action" value="reject" formnovalidate>审核不通过</button>
       <button class="button primary" type="submit" name="action" value="approve">通过并确认发布</button></div></form>`);
   }
 
-  function renderAgentCard(card, index) {
+  function renderAgentCard(card, index, activeDraft) {
     if (!card || typeof card !== 'object') return '';
+    if (card.kind === 'saved') {
+      return `<div class="inner-card automation-chat-card"><h3>${esc(card.name)}</h3>${link(card.id, '查看规则')}</div>`;
+    }
+    if (card.kind === 'draft') {
+      if (!activeDraft) return '';
+      const rule = card.proposal || {}, video = rule.video || {};
+      const values = [
+        ['规则名称', rule.name], ['执行频率', frequencyLabels[rule.frequency]], ['时区', rule.zone],
+        ['首次生成', rule.startsAt?.replace('T', ' ')], ['发布时间', rule.publishAt],
+        ['发布方式', rule.policy && policy(rule.policy)], ['目标账号', card.accountName || rule.accountId],
+        ['发布标题', rule.title], ['视频描述', rule.description],
+        ['模型', card.modelName || video.model], ['画幅', video.ratio], ['清晰度', video.resolution],
+        ['时长', video.duration === -1 ? '自动' : video.duration ? `${video.duration} 秒` : ''],
+        ['声音', video.model ? video.audio ? '生成声音' : '无声音' : ''],
+        ['单次生成上限', rule.maxCredits != null ? `${rule.maxCredits} 积分` : '']
+      ];
+      const missing = Array.isArray(card.missing) ? card.missing : [];
+      const issues = Array.isArray(card.issues) ? card.issues : [];
+      return `<div class="inner-card automation-chat-card"><h3>自动化任务草稿</h3>
+        <dl class="details automation-draft-summary">${values.filter(([,value]) => value).map(([label,value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>
+        ${video.prompt ? `<div class="automation-draft-prompt"><strong>视频提示词</strong><p>${esc(video.prompt)}</p></div>` : ''}
+        ${missing.length ? `<p class="field-note">待补充 ${esc(missing.join('、'))}</p>` : ''}
+        ${issues.map(issue => `<p class="form-error">${esc(issue)}</p>`).join('')}
+        ${card.ready ? `<button type="button" class="button primary" data-action="automation-confirm-draft" data-id="${index}">确认任务草稿</button>` : ''}</div>`;
+    }
     if (card.kind === 'create' || card.kind === 'edit') return `<div class="inner-card automation-chat-card"><h3>${card.kind === 'create' ? '任务规则草稿' : '规则修改草稿'}</h3>
       <p>${esc(card.proposal?.name || card.name || '请补齐规则设置')}</p>${button('chat-edit', '打开草稿', index)}</div>`;
     if (card.kind === 'action') return `<div class="inner-card automation-chat-card"><h3>${actionLabels[card.action] || '规则操作'}</h3>
@@ -260,7 +286,7 @@ export function createAutomationControls({ document, main, context, request, not
       dialog.close();
       notify(type === 'save' ? '规则已保存，可在任务模块启用。' : '任务已更新。');
       if (context().page === 'automation') await refresh();
-      else document.defaultView.location.hash = '#automation';
+      else if (type !== 'review') document.defaultView.location.hash = '#automation';
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }
     finally { busy = false; for (const item of dialog.querySelectorAll('button')) item.disabled = false; }
   });

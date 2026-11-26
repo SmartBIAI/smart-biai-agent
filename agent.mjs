@@ -9,7 +9,7 @@ export const agentTools = [
   { name: 'list_models', description: '读取当前应用授权模型及各模型参数、参考素材能力。必须使用目录中的准确 ID，不猜测模型授权。', arguments: { kind: 'image|video' } },
   { name: 'list_account_tags', description: '查询当前应用的本地账号标签名称、ID和关联账号数。标签用于分类，不代表授权或发布权限。', arguments: {} },
   { name: 'list_automations', description: '查看自动化任务规则及执行进度，可按规则名或ID筛选，可只查看待审核任务。', arguments: { keyword: 'string?', ruleId: 'string?', reviewOnly: 'boolean?' } },
-  { name: 'prepare_automation', description: '准备自动化任务卡片。create 为新建草稿，edit 为规则修改草稿，enable/pause/run 为启用/暂停/立即执行一次的确认入口，review 为审核入口。修改或操作已有规则时先查规则，审核时先查执行记录。仅准备卡片，用户须自行保存或确认。', arguments: { action: 'create|edit|enable|pause|run|review', ruleId: 'string?', runId: 'string?', changes: '{name?,zone?,startsAt?:YYYY-MM-DDTHH:mm,frequency?:once|daily|weekly,publishAt?:HH:mm,policy?:review|auto,accountId?,title?,description?,maxCredits?:integer,video?:{model?,prompt?,ratio?,resolution?,duration?,audio?}}?' } },
+  { name: 'prepare_automation', description: 'create 更新当前对话的自动化规则草稿，逐轮合并用户补充的字段。只有用户明确要求另起一条草稿时设置 newDraft。edit 为修改已有规则，enable/pause/run 为确认入口，review 为已排期任务的审核入口。仅准备卡片。', arguments: { action: 'create|edit|enable|pause|run|review', ruleId: 'string?', runId: 'string?', newDraft: 'boolean?', changes: '{name?,zone?,startsAt?:YYYY-MM-DDTHH:mm,frequency?:once|daily|weekly,publishAt?:HH:mm,policy?:review|auto,accountId?,title?,description?,maxCredits?:integer,video?:{model?,prompt?,ratio?,resolution?,duration?,audio?}}?' } },
   { name: 'list_accounts', description: '查询社媒账号及实际授权状态。平台、国家、标签之间同时满足，平台或国家多选时匹配任一。标签支持任一/全部，名称不确定时先查 list_account_tags。仅查询本地标签，不修改账号。', arguments: { platform: 'string?', country: 'string?', platforms: 'string[]?', countries: 'string[]?', tags: 'string[]? 标签名称或ID', tagMatch: 'any|all?', untagged: 'boolean?', keyword: 'string?', id: 'string?' } },
   { name: 'prepare_generation', description: '新建或修改图片/视频草稿并获取新报价，不提交生成。source 指定继承的任务或草稿；changes 只放用户想改的字段。原附件默认继承，可 append/replace/clear。outputs 可把已完成任务的结果作为参考。', arguments: { kind: 'image|video', source: '{kind,id}?', changes: '{model?,prompt?,n?,size?,quality?,ratio?,resolution?,duration?,audio?}', attachments: '{mode: inherit|append|replace|clear, ids?: string[], maskId?: string|null}?', outputs: '[{target:{kind:image|video,id},index?:integer,role?:string}]?' } },
   { name: 'quote_draft', description: '为现有生成草稿重新获取报价。确认费用和参数后，用户仍须点击卡片确认生成。', arguments: { target: '{kind:draft,id}' } },
@@ -25,7 +25,8 @@ export const agentInstructions = `你是 Smart BIAI 的多轮任务 Agent。理�
 所有生成和发布都必须经卡片确认。工具只能读信息、准备草稿或报价，不能直接提交、确认、取消、删除任务，不能改变配置或读取密钥。不要声称草稿已经生成或发布；调用 prepare 后应明确要求用户检查卡片、费用和参数。
 prepare_generation 会按新模型能力校验参数并尝试新报价。附件数量、蒙版等不兼容时不要擅自舍弃，请用户决定。参数已由工具调整时说明调整。不要编造图像内容、可用下载链接、账号或执行结果。附件只有类型和名称，图片内容由生成服务结合原素材处理。
 发布目标只能是实际授权账号；账号缺失可以先准备待选择草稿，禁止猜选。本地账号标签可结合平台、国家筛选；先查询标签目录以使用准确名称或ID，标签不表示账号授权，不可根据标签推定发布权限。工具只能读取标签，标签的添加、编辑、删除在社媒账号页完成。时间使用 context.now 与 context.zone；预约有歧义时询问。已确认的发布任务不能假装已修改。操作范围之外的请求应说明能力。
-周期性或按规则自动生成与发布使用 list_automations 和 prepare_automation，单次已有视频发布仍使用 prepare_publication。准备自动化草稿时只填用户已明确的信息，留待用户在表单补齐其他字段。启用自动发布规则与运行规则均需用户在界面确认；人工审核规则须逐条确认后安排发布。管理规则和查看执行记录时先查询真实数据，多个目标时请用户选择。
+根据语义判断用户是否在创建按规则自动生成并排期发布的任务。开始创建时立即调用 prepare_automation(action=create) 保存已明确的参数；随后的短回答也结合 context.automationDraft 理解并调用同一工具合并新参数。查询另一个任务或发起普通创作属于独立请求。新建规则通常需要规则名、视频提示词和模型、执行频率、首次生成时间、发布时间、目标账号、发布标题、发布方式和单次积分上限。时区默认工作台设置，归一化相对时间时使用 context.now 和时区。账号和模型若用名字描述，先查真实账号或模型，唯一匹配后填准确 ID。不要猜选目标账号、自动发布方式或积分上限。
+读到草稿的 missing 和 issues 后，用自然语言询问最相关的 1～3 项，其他已收集的信息保持原样。ready 为 true 时请用户点击对话卡片上的确认按钮保存；用户发送文字“确认”时仍需使用卡片。保存后还需单独启用。人工审核的执行在视频完成时先创建排期，审核通过才允许按排期发布。查询和操作已有规则用 list_automations 和 prepare_automation，单次已有视频发布仍使用 prepare_publication。
 每次读取工具结果后，依据结果继续、修正计划或询问用户；不要无意义重复失败调用。respond.memory 可简要保留尚未完成目标、用户约束和明确时间，便于后续接续。`;
 
 const clone = value => structuredClone(value);
@@ -38,6 +39,12 @@ const bounded = (value, max) => typeof value === 'string' ? value.slice(0, max) 
 const normalizeName = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s_\-]/g, '');
 const draftKind = draft => draft.generationId ? 'publication' : draft.kind === 'image' ? 'image' : 'video';
 const canonical = value => Array.isArray(value) ? value.map(canonical) : record(value) ? Object.fromEntries(Object.keys(value).sort().map(name=>[name,canonical(value[name])])) : value;
+
+function automationContext(draft) {
+  if (!draft) return undefined;
+  const { proposal, missing, issues, ready } = draft;
+  return { proposal, missing, issues, ready };
+}
 
 function target(value) {
   if (!record(value) || !kinds.includes(value.kind) || typeof value.id !== 'string' || !value.id || value.id.length > 100) throw failure('请选择明确的任务或草稿。');
@@ -319,7 +326,8 @@ export async function runConversationAgent(input, dependencies) {
   }
   const history = chat.slice(-28).map(entry => entry.type === 'user' || entry.type === 'text' ? {
     role:entry.type === 'user' ? 'user' : 'assistant',text:bounded(entry.text,2000),files:entry.files?.map(file=>({id:file.id,name:file.name,type:file.type})),
-    targets:entry.targets,automation:entry.automation,accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus,tags:item.tags?.map(tag=>({id:tag.id,name:tag.name}))})),accountTotal:entry.accounts?.length
+    targets:entry.targets,automation:entry.automation ? { kind: entry.automation.kind, name: entry.automation.name || entry.automation.proposal?.name } : undefined,
+    accounts:entry.accounts?.slice(0,30).map(item=>({id:item.id,name:item.name,platform:item.platform,country:item.country,authStatus:item.authStatus,tags:item.tags?.map(tag=>({id:tag.id,name:tag.name}))})),accountTotal:entry.accounts?.length
   } : {role:'assistant',type:entry.type,id:entry.id,ids:entry.ids});
   async function execute(call) {
     const args = call.arguments || {};
@@ -345,6 +353,10 @@ export async function runConversationAgent(input, dependencies) {
       if (!dependencies.automation) throw failure('当前环境暂未接入自动化任务。');
       const result = await dependencies.automation(call.tool, args);
       chat.push({ type: 'text', text: result.text, automation: result.card });
+      if (result.card.kind === 'draft') {
+        const { id, proposal, missing, issues, ready } = result.card;
+        return { kind: 'draft', id, proposal, missing, issues, ready, requiresConfirmation: ready };
+      }
       return { ...result.card, requiresConfirmation: call.tool === 'prepare_automation' };
     }
     if (call.tool === 'list_accounts') { validateAccountFilters(args);const result=await dependencies.accounts(args); for(const account of result.accounts)touched.accounts.set(account.id,account);chat.push({type:'text',text:`找到 ${result.accounts.length} 个匹配账号。${result.limited?'当前只查询了部分账号，可按账号 ID 或平台缩小范围。':''}`,accounts:result.accounts});return result; }
@@ -359,7 +371,8 @@ export async function runConversationAgent(input, dependencies) {
     let plan;
     try {
       plan = await dependencies.plan({context:{conversationId:conversation.id,message,mode,now:new Date(now).toISOString(),zone,memory:nextMemory,history,recentActions:input.recentActions || [],
-        currentFiles,models:modelSummary,resources:[...inspected.values()].slice(-50).map(({ref,item})=>brief(ref,item)),confirmationRequired:true},observations:clone(observations)});
+        currentFiles,models:modelSummary,automationDraft:automationContext(dependencies.automationDraft?.()),
+        resources:[...inspected.values()].slice(-50).map(({ref,item})=>brief(ref,item)),confirmationRequired:true},observations:clone(observations)});
     } catch (error) {
       if (!changed.size) throw error;
       notes.push(bounded(error.message,500)); break;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { runConversationAgent } from '../agent.mjs';
+import { collectAutomationDraft } from '../automation-draft.mjs';
 import { planAgent } from '../integrations.mjs';
 import { imageModels, models, imageParameters, videoParameters } from '../generation-models.js';
 
@@ -171,4 +172,39 @@ test('elapsed-time limits preserve a prepared draft without invoking another pla
   h.dependencies.plan=async()=>{plans++;return {calls:[call('prepare_generation',{kind:'image',source:{kind:'image',id:h.source.id},changes:{}})]};};
   const quote=h.dependencies.quote;h.dependencies.quote=async(...args)=>{const result=await quote(...args);elapsed=91000;return result;};
   const result=await h.run();assert.equal(plans,1);assert.equal(result.drafts.length,1);assert.equal(result.drafts[0].credits,14);
+});
+
+test('the semantic planner receives an active automation draft for a follow-up without automation keywords', async () => {
+  const h = harness();
+  const catalog = () => models;
+  const findAccount = () => ({ id: '101', name: '品牌主号', platform: 'TikTok', authStatus: 20, canPublish: true });
+  const options = { zone: 'Asia/Shanghai', modelCatalog: catalog, findAccount, now: h.now };
+  let draft = await collectAutomationDraft(null, { name: '新品展示', frequency: 'daily', startsAt: '2026-11-19T09:00',
+    publishAt: '16:00', title: '新品展示', accountId: '101', video: { model: models[0].id, prompt: '展示新品马克杯的釉面。' } }, options);
+  assert.equal(draft.ready, false);
+  h.conversation.chat.splice(-1, 0, { type: 'text', text: '还需要确认审核方式和积分上限。', automation: draft });
+  h.conversation.chat.at(-1).text = '我先看一遍，每次最多六十积分。';
+  const original = draft.id;
+  h.dependencies.automationDraft = () => draft;
+  h.dependencies.automation = async (tool, { changes }) => {
+    assert.equal(tool, 'prepare_automation');
+    draft = await collectAutomationDraft(draft, changes, options);
+    return { text: '请检查并确认草稿。', card: draft };
+  };
+  h.setSteps([state => {
+    assert.equal(state.context.message, '我先看一遍，每次最多六十积分。');
+    assert.equal(state.context.automationDraft.proposal.name, '新品展示');
+    assert.deepEqual(state.context.automationDraft.missing, ['发布方式（人工审核或自动发布）', '单次生成积分上限']);
+    return { calls: [call('prepare_automation', { action: 'create', changes: { policy: 'review', maxCredits: 60 } })] };
+  }, state => {
+    assert.equal(state.observations.at(-1).result.ready, true);
+    assert.equal(state.context.automationDraft.proposal.frequency, 'daily');
+    return respond();
+  }]);
+  const result = await h.run();
+  const card = result.chat.findLast(entry => entry.automation).automation;
+  assert.equal(card.id, original);
+  assert.equal(card.ready, true, card.issues.join(' '));
+  assert.equal(card.proposal.maxCredits, 60);
+  assert.equal(card.proposal.video.prompt, '展示新品马克杯的釉面。');
 });

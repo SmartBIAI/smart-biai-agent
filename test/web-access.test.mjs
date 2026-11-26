@@ -141,24 +141,62 @@ test('subpath login serves assets, authorizes cookies and logs out without a bro
     }
     assert.fail('automation execution timed out');
   }
-  await untilRun(run => run.reviewable);
-  assert.equal((await api('publications')).length, 0);
+  const held = await untilRun(run => run.reviewable);
+  const [heldPublication] = await api('publications');
+  assert.equal(heldPublication.status, 'awaiting_review');
+  assert.equal(heldPublication.automationRunId, execution.id);
+  assert.equal(heldPublication.id, held.publicationId);
+  // Move the test schedule into the past, then let the normal mock publish worker run on the next API call.
+  const fixtureDb = new DatabaseSync(join(directory, 'workbench.sqlite'));
+  try { fixtureDb.prepare('UPDATE publication SET planned=? WHERE id=?').run(Date.now() - 60_000, heldPublication.id); }
+  finally { fixtureDb.close(); }
+  const overdue = (await api('publications'))[0];
+  assert.equal(overdue.status, 'awaiting_review');
+  assert.equal(overdue.submitted, null);
   const draftId = randomUUID(), draftMessage = '新建自动化任务';
   await api(`conversations/${draftId}`, { revision: 0, chat: [{ type: 'user', text: draftMessage }], drafts: [] });
   const draft = await api('agent', { protocol: 'agent.v1', turnId: randomUUID(), conversationId: draftId, revision: 1, message: draftMessage,
     command: { tool: 'prepare_automation', arguments: { action: 'create', changes: { name: 'Agent 规则草稿', policy: 'auto' } } } });
-  assert.equal(draft.conversation.chat.find(entry => entry.automation)?.automation.proposal.name, 'Agent 规则草稿');
+  const partial = draft.conversation.chat.find(entry => entry.automation).automation;
+  assert.equal(partial.proposal.name, 'Agent 规则草稿');
+  assert.equal(partial.ready, false);
   assert.equal((await api('automation')).rules.length, 1, 'the agent proposal does not save or enable a rule');
+  const confirm = (card, revision, expected) => api('automation/confirm-draft', {
+    conversationId: draftId, id: card.id, version: card.version, revision
+  }, expected);
+  await confirm(partial, draft.conversation.revision, 400);
+  const details = '每天跑一轮，使用品牌主号，视频展示一只白色陶瓷杯。';
+  const nextTurn = await api(`conversations/${draftId}`, { revision: draft.conversation.revision,
+    chat: [...draft.conversation.chat, { type: 'user', text: details }], drafts: [] });
+  const filled = await api('agent', { protocol: 'agent.v1', turnId: randomUUID(), conversationId: draftId, revision: nextTurn.revision, message: details,
+    command: { tool: 'prepare_automation', arguments: { action: 'create', changes: {
+      frequency: 'daily', accountId: boot.accounts[0].id, zone: 'UTC', startsAt: utc(5), publishAt: utc(15).slice(11),
+      title: '每日产品展示', maxCredits: 100, video: { model: model.id, prompt: '细节展示：一只白色陶瓷杯缓慢旋转。' }
+    } } } });
+  const ready = filled.conversation.chat.findLast(entry => entry.automation).automation;
+  assert.equal(ready.id, partial.id);
+  assert.equal(ready.proposal.name, partial.proposal.name);
+  assert.equal(ready.proposal.policy, 'auto');
+  assert.equal(ready.ready, true, ready.issues.join(' '));
+  await confirm(partial, filled.conversation.revision, 409);
+  const confirmed = await confirm(ready, filled.conversation.revision);
+  assert.equal(confirmed.rule.enabled, false);
+  assert.equal(confirmed.conversation.chat.findLast(entry => entry.automation).automation.kind, 'saved');
+  assert.equal((await confirm(ready, filled.conversation.revision)).rule.id, confirmed.rule.id);
+  assert.equal((await api('automation')).rules.length, 2);
   const conversationId = randomUUID(), message = '查看自动化任务';
   await api(`conversations/${conversationId}`, { revision: 0, chat: [{ type: 'user', text: message }], drafts: [] });
   const response = await api('agent', { protocol: 'agent.v1', turnId: randomUUID(), conversationId, revision: 1, message,
     command: { tool: 'list_automations', arguments: { reviewOnly: true } } });
   assert.equal(response.conversation.chat.find(entry => entry.automation)?.automation.runs[0].id, execution.id);
-  assert.equal((await api('publications')).length, 0);
-  await api('automation/review', { id: execution.id, action: 'approve', title: '确认后的标题' });
+  assert.equal((await api('publications'))[0].status, 'awaiting_review');
+  await api('automation/review', { id: execution.id, action: 'approve' }, 400);
+  await api('automation/review', { id: execution.id, action: 'approve', title: '确认后的标题',
+    planned: new Date(heldPublication.planned).toISOString().slice(0, 16) });
   const scheduled = await untilRun(run => run.status === 'scheduled');
   const [publication] = await api('publications');
   assert.equal(publication.id, scheduled.publicationId);
+  assert.equal(publication.id, heldPublication.id);
   assert.equal(publication.title, '确认后的标题');
   assert.equal((await fetch(`${url}/automation.js`, { headers: auth })).status, 200);
   const basic = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };

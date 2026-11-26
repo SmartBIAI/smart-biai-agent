@@ -273,6 +273,9 @@ input::placeholder, textarea::placeholder { color: #777b90; }
 .automation-form-group { padding-top: 13px; border-top: 1px solid var(--line); }
 .automation-chat-card { display: grid; justify-items: start; gap: 9px; margin-top: 8px; }
 .automation-chat-row { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 13px; }
+.automation-draft-summary { width: 100%; }
+.automation-draft-summary dd, .automation-draft-prompt p { overflow-wrap: anywhere; }
+.automation-draft-prompt p { white-space: pre-wrap; max-height: 12rem; overflow: auto; }
 @media (max-width: 790px) {
   .automation-layout { grid-template-columns: minmax(0, 1fr); }
   .automation-scroll { max-height: 52dvh; }

@@ -15,7 +15,7 @@ const formatter = zone => new Intl.DateTimeFormat('sv-SE', {
 const local = (time, zone) => formatter(zone).format(time).replace(' ', 'T');
 const addDays = (date, days) => new Date(Date.parse(date + 'T00:00Z') + days * day).toISOString().slice(0, 10);
 
-function wallTime(value, zone) {
+export function wallTime(value, zone) {
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(value)) return null;
   const utc = Date.parse(value + 'Z');
   if (!Number.isFinite(utc) || new Date(utc).toISOString().slice(0, 16) !== value) return null;
@@ -75,6 +75,7 @@ export function createAutomation(db, dependencies) {
   );
   CREATE INDEX IF NOT EXISTS automation_rule_due ON automation_rule(enabled, next_at);
   CREATE INDEX IF NOT EXISTS automation_run_history ON automation_run(mode, created DESC);
+  CREATE INDEX IF NOT EXISTS automation_run_publication ON automation_run(publication_id);
   CREATE INDEX IF NOT EXISTS automation_run_work ON automation_run(status, updated);`);
   const ruleById = db.prepare('SELECT * FROM automation_rule WHERE id=? AND mode=?');
   const runById = db.prepare('SELECT * FROM automation_run WHERE id=? AND mode=?');
@@ -87,11 +88,12 @@ export function createAutomation(db, dependencies) {
   const viewRun = row => {
     const rule = JSON.parse(row.spec);
     const video = dependencies.video(row.generation_id, row.mode);
-    const publication = row.status === 'publication' ? dependencies.publication(row.publication_id, row.mode) : null;
+    const publication = ['publication', 'release', 'review'].includes(row.status) ? dependencies.publication(row.publication_id, row.mode) : null;
+    const reviewable = publication?.status === 'awaiting_review';
     return { id: row.id, ruleId: row.rule_id, name: rule.name, accountId: rule.accountId, policy: rule.policy, zone: rule.zone,
       title: row.approval ? JSON.parse(row.approval).title : rule.title, description: row.approval ? JSON.parse(row.approval).description : rule.description,
       scheduledAt: row.scheduled_at, publishAt: publication ? publication.planned : row.publish_at, status: publication?.status ?? row.status,
-      reviewable: row.status === 'review', cancelable: ['pending', 'generating', 'review', 'release'].includes(row.status),
+      reviewable, cancelable: !publication && ['pending', 'generating', 'review', 'release'].includes(row.status),
       generationId: video?.id, videoStatus: video?.status, publicationId: publication?.id,
       credits: row.credits, error: publication?.error || row.error || video?.error, updated: row.updated };
   };
@@ -120,7 +122,7 @@ export function createAutomation(db, dependencies) {
       randomUUID(), randomUUID(), status, error, now(), now());
     return id;
   }
-  async function save(mode, body) {
+  async function save(mode, body, confirmation) {
     const captured = connection(mode);
     const parameters = await dependencies.parameters(body.video, mode);
     const rule = validateRule(body, parameters);
@@ -130,14 +132,17 @@ export function createAutomation(db, dependencies) {
     await dependencies.account(mode, rule.accountId);
     if (connection(mode) !== captured) fail(409, '服务连接已变化，请重新保存。');
     return transaction(() => {
-      const id = before?.id || randomUUID();
+      confirmation?.check();
+      const id = before?.id || confirmation?.ruleId || randomUUID();
       if (before) {
         checkRevision(getRule(id, mode), body.revision);
         db.prepare('UPDATE automation_rule SET spec=?,connection=?,next_at=NULL,revision=revision+1,updated=? WHERE id=?').run(JSON.stringify(rule), captured, now(), id);
       } else {
         db.prepare('INSERT INTO automation_rule VALUES(?,?,?,?,0,NULL,1,?)').run(id, mode, JSON.stringify(rule), captured, now());
       }
-      return viewRule(getRule(id, mode));
+      const saved = viewRule(getRule(id, mode));
+      confirmation?.record(saved);
+      return saved;
     });
   }
   function manage(mode, body) {
@@ -166,20 +171,22 @@ export function createAutomation(db, dependencies) {
   function review(mode, body) {
     return transaction(() => {
       const row = getRun(body.id, mode), rule = JSON.parse(row.spec);
-      if (body.action === 'cancel' && ['pending', 'generating', 'review', 'release'].includes(row.status)) {
-        if (dependencies.publication(row.publication_id, mode)) fail(409, '已创建发布任务，请前往发布任务取消排期。');
+      const publication = dependencies.publication(row.publication_id, mode);
+      if (publication?.status === 'awaiting_review' && ['reject', 'cancel'].includes(body.action)) {
+        dependencies.reviewPublication(publication.id, mode, { action: body.action });
+      } else if (!publication && body.action === 'cancel' && ['pending', 'generating', 'review', 'release'].includes(row.status)) {
         setRun(row, 'canceled');
-      }
-      else if (body.action === 'reject' && row.status === 'review') setRun(row, 'rejected');
-      else if (body.action === 'approve' && row.status === 'review') {
+      } else if (body.action === 'approve' && publication?.status === 'awaiting_review') {
         requireConnection(row);
-        const planned = body.planned == null ? row.publish_at : wallTime(body.planned, rule.zone);
+        const planned = body.planned == null ? publication.planned : wallTime(body.planned, rule.zone);
         if (!planned || planned <= now()) fail(400, '原发布时间已过，或所选时间无效。请选择未来的发布时间。');
         const video = dependencies.video(row.generation_id, mode);
         if (video?.status !== 'completed' || video.expiresAt && planned >= video.expiresAt) fail(409, '视频在该时间不可用，请调整发布时间。');
-        const approval = JSON.stringify({ title: text(body.title ?? rule.title, 100, '发布标题'),
-          description: text(body.description ?? rule.description, 1000, '发布描述', true) });
-        db.prepare("UPDATE automation_run SET status='release', approval=?, publish_at=?, updated=? WHERE id=?").run(approval, planned, now(), row.id);
+        const title = text(body.title ?? rule.title, 100, '发布标题');
+        const description = text(body.description ?? rule.description, 1000, '发布描述', true);
+        dependencies.reviewPublication(publication.id, mode, { action: 'approve', planned, title, description });
+        db.prepare('UPDATE automation_run SET approval=?,publish_at=?,updated=? WHERE id=?')
+          .run(JSON.stringify({ title, description }), planned, now(), row.id);
       } else fail(409, '当前状态无法执行此操作，请刷新后重试。');
       return viewRun(getRun(row.id, mode));
     });
@@ -187,7 +194,11 @@ export function createAutomation(db, dependencies) {
   async function advance(row) {
     const rule = JSON.parse(row.spec);
     try {
-      if (row.status === 'pending' || row.status === 'release') requireConnection(row);
+      if (['release', 'review'].includes(row.status) && dependencies.publication(row.publication_id, row.mode)) {
+        setRun(row, 'publication');
+        return;
+      }
+      if (['pending', 'release', 'review'].includes(row.status)) requireConnection(row);
       const video = dependencies.video(row.generation_id, row.mode);
       if (row.status === 'pending') {
         if (now() >= row.publish_at || now() - row.scheduled_at > startWindow) { setRun(row, 'missed', '已错过本次执行时间。'); return; }
@@ -206,17 +217,20 @@ export function createAutomation(db, dependencies) {
         });
       } else if (row.status === 'generating') {
         if (['failed', 'expired'].includes(video?.status)) setRun(row, 'failed', video.error || '视频生成失败或已过期。');
-        else if (video?.status === 'completed') setRun(row, rule.policy === 'review' ? 'review' : 'release');
+        else if (video?.status === 'completed') setRun(row, 'release');
         else db.prepare('UPDATE automation_run SET updated=? WHERE id=? AND status=?').run(now(), row.id, row.status);
       } else {
-        if (dependencies.publication(row.publication_id, row.mode)) { setRun(row, 'publication'); return; }
-        if (now() >= row.publish_at) { setRun(row, 'missed', '未能在计划时间前排入发布。'); return; }
+        const awaitingReview = rule.policy === 'review' && !row.approval;
+        if (!awaitingReview && now() >= row.publish_at) { setRun(row, 'missed', '未能在计划时间前排入发布。'); return; }
         const copy = row.approval ? JSON.parse(row.approval) : rule;
         // Use the same publication ID after a restart, including a crash after insertion.
         await dependencies.publish({ id: row.publication_id, generationId: row.generation_id, accountId: rule.accountId,
-          title: copy.title, description: copy.description, planned: row.publish_at, zone: rule.zone, ai: true }, row.mode, () => {
-          if (getRun(row.id, row.mode).status !== 'release') fail(409, '本次任务已取消。');
-          requireConnection(row);
+          title: copy.title, description: copy.description, planned: row.publish_at, zone: rule.zone, ai: true }, row.mode, {
+          awaitingReview,
+          beforeInsert: () => {
+            if (getRun(row.id, row.mode).status !== row.status) fail(409, '本次任务已取消。');
+            requireConnection(row);
+          }
         });
         setRun(row, 'publication');
       }
@@ -234,7 +248,7 @@ export function createAutomation(db, dependencies) {
           db.prepare('UPDATE automation_rule SET next_at=?,enabled=?,revision=revision+1,updated=? WHERE id=?').run(next, Number(next !== null), now(), row.id);
         }
       });
-      const work = db.prepare("SELECT * FROM automation_run WHERE status IN ('pending','generating','release') ORDER BY updated LIMIT 20").all();
+      const work = db.prepare("SELECT * FROM automation_run WHERE status IN ('pending','generating','release','review') ORDER BY updated LIMIT 20").all();
       await Promise.all(work.map(advance));
     } finally { busy = false; }
   }

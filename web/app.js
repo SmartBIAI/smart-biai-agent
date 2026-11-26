@@ -38,6 +38,7 @@ const zoneLabels = {
 };
 const pubStatuses = {
   queued: ['等待发布', 'purple'], scheduled: ['已排期', 'purple'], publishing: ['发布中', 'blue'],
+  awaiting_review: ['待审核', 'orange'], rejected: ['审核未通过', 'red'],
   completed: ['发布完成', 'green'], expired: ['素材已过期', 'red'], missed: ['已错过', 'red'], canceled: ['已取消', 'gray'],
   submitting: ['正在发送', 'blue'], queued_upstream: ['平台处理中', 'blue'], failed: ['发布失败', 'red'], unknown: ['状态待确认', 'orange']
 };
@@ -487,9 +488,13 @@ function renderChat() {
     box.innerHTML = `<div class="welcome"><div class="agent-symbol">${icon('agent', 30)}</div><h2>今天想做什么？</h2><p>从查找账号到确认发布，在同一个对话里完成。</p><div class="prompt-grid">${prompts.map(([symbol, title, detail, message]) => `<button class="prompt" data-action="prompt" data-message="${esc(message)}"><span class="prompt-icon">${icon(symbol)}</span><strong>${title}</strong><small>${detail}</small>${icon('arrow', 16)}</button>`).join('')}</div>${recentVideos()}</div>`;
     return;
   }
+  const latestAutomation = state.chat.findLast(item => ['draft','saved'].includes(item.automation?.kind));
   box.innerHTML = chatForDisplay().map(entry => {
     if (entry.type === 'user') return `<div class="message user"><div class="bubble">${esc(entry.text)}${attachmentList(entry.files)}</div><div class="avatar user-avatar">${icon('accounts', 17)}</div></div>`;
-    if (entry.automation) return assistant(`<p>${esc(entry.text)}</p>${automationControls.renderAgentCard(entry.automation, state.chat.indexOf(entry))}`);
+    if (entry.automation) {
+      if (entry.automation.kind === 'draft' && latestAutomation !== entry) return '';
+      return assistant(`<p>${esc(entry.text)}</p>${automationControls.renderAgentCard(entry.automation, state.chat.indexOf(entry), latestAutomation === entry)}`);
+    }
     if (entry.type === 'generation') return assistant(renderGenerationDraft(state.drafts.get(entry.id)));
     if (entry.type === 'result') return assistant(resultCard(entry.id, entry.intent));
     if (entry.type === 'image-generation') return assistant(renderImageDraft(state.drafts.get(entry.id)));
@@ -779,7 +784,7 @@ function empty(title, detail, symbol = 'search') {
   return `<div class="empty"><span class="card-icon">${icon(symbol, 22)}</span><strong>${title}</strong><p>${detail}</p></div>`;
 }
 
-const tabs = { all: '全部', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '视频生成任务', image: '图片生成任务' };
+const tabs = { all: '全部', awaiting_review: '待审核', scheduled: '已排期', publishing: '发布中', completed: '已完成', generation: '视频生成任务', image: '图片生成任务' };
 
 function taskRecords() {
   if (state.taskTab === 'image') return state.images;
@@ -853,14 +858,16 @@ function renderTaskDetail(item) {
     ['创建发布任务', item.created],
     [item.planned ? '预约时间' : '等等待发布', item.planned],
     ...(item.submitted ? [[item.mode === 'live' ? '已发送给 Smart BIAI' : '模拟发布已开始', item.submitted]] : []),
-    ...(['completed', 'missed', 'expired', 'canceled', 'failed'].includes(item.status) ? [[pubStatuses[item.status][0], item.updated]] : [])
+    ...(['completed', 'missed', 'expired', 'canceled', 'failed', 'rejected'].includes(item.status) ? [[pubStatuses[item.status][0], item.updated]] : [])
   ];
   return `<div class="detail-title"><h2>任务详情</h2><button class="icon-button" data-action="close-task" aria-label="关闭任务详情">${icon('close', 19)}</button></div>
     <div class="task-work detail-work">${thumbnail(item.coverUrl || video?.coverUrl)}<strong>${esc(item.title)}</strong></div>
     <dl class="details"><div><dt>目标账号</dt><dd>${esc(account?.platform)} · ${esc(account?.name ?? item.accountId)}</dd></div><div><dt>状态</dt><dd>${publicationBadge(item.status)}</dd></div><div><dt>发布时间</dt><dd>${item.planned ? `${dateFormat(item.planned, item.zone)} · ${esc(zoneLabels[item.zone] || item.zone)}` : '立即发布'}</dd></div><div><dt>更新时间</dt><dd>${dateFormat(item.updated, item.zone)}</dd></div>${item.sourceTaskId ? `<div><dt>Smart BIAI 任务编号</dt><dd class="break">${esc(item.sourceTaskId)}</dd></div>` : ''}${item.materialId ? `<div><dt>视频编号</dt><dd class="break">${esc(item.materialId)}</dd></div>` : ''}</dl>
     ${item.error ? `<p class="form-error">${esc(item.error)}</p>` : ''}
     <h3 class="timeline-title">进度记录</h3><ol class="timeline">${events.map(([label, time]) => `<li><strong>${label}</strong><small>${time ? dateFormat(time, item.zone) : '待处理'}</small></li>`).join('')}</ol>
-    <div class="detail-actions">${video?.url ? `<a class="text-button" href="${esc(video.url)}" target="_blank" rel="noreferrer">打开源视频 ↗</a>` : ''}${item.status === 'scheduled' ? `<button class="button danger" data-action="cancel" data-id="${item.id}">取消排期</button>` : ''}</div>`;
+    <div class="detail-actions">${video?.url ? `<a class="text-button" href="${esc(video.url)}" target="_blank" rel="noreferrer">打开源视频 ↗</a>` : ''}
+    ${item.status === 'awaiting_review' && item.automationRunId ? `<button type="button" class="button primary" data-automation-action="review" data-id="${esc(item.automationRunId)}">审核排期</button>` : ''}
+    ${['scheduled', 'awaiting_review'].includes(item.status) ? `<button class="button danger" data-action="cancel" data-id="${esc(item.id)}">取消排期</button>` : ''}</div>`;
 }
 
 function settingsCard(name, symbol, title, detail, fields) {
@@ -924,6 +931,32 @@ async function applyAgentResponse(response) {
   const {id,title,revision,updated}=response.conversation;
   state.history=[{id,title,revision,updated},...state.history.filter(item=>item.id!==id)];
   renderConversationHistory();
+}
+
+async function confirmAutomationDraft(index, control) {
+  const card = state.chat[index]?.automation;
+  if (card?.kind !== 'draft' || !card.ready || state.formBusy || state.intentBusy || !state.conversation) return;
+  state.formBusy++;
+  control.disabled = true;
+  try {
+    if (!await flushConversation()) return;
+    const { id, revision } = state.conversation;
+    const result = await request('automation/confirm-draft', { conversationId: id, revision, id: card.id, version: card.version });
+    await applyAgentResponse({ protocol: 'agent.v1', conversation: result.conversation });
+    renderChat();
+  } catch (error) {
+    if (error.status === 409) {
+      try {
+        const conversation = await request(`conversations/${state.conversation.id}`);
+        await applyAgentResponse({ protocol: 'agent.v1', conversation });
+        renderChat();
+      } catch { /* Retain the current card when reconnecting fails. */ }
+    }
+    notify(error.message);
+  } finally {
+    state.formBusy--;
+    control.disabled = false;
+  }
 }
 
 async function sendMessage(message, { mediaType, referenceFiles, understood, choice, command } = {}) {
@@ -1334,6 +1367,7 @@ main.addEventListener('click', async event => {
   if (!control || state.historyBusy) return;
   const { action, id } = control.dataset;
   switch (action) {
+    case 'automation-confirm-draft': void confirmAutomationDraft(Number(id), control); break;
     case 'agent-adjust': void sendMessage('调整这条创作的参数',{command:{tool:'prepare_generation',arguments:{kind:control.dataset.kind,source:{kind:control.dataset.kind,id},changes:{}}}}); break;
     case 'agent-show': void sendMessage('查看这条记录',{command:{tool:'get_task',arguments:{target:{kind:control.dataset.kind,id},refresh:true,show:true}}}); break;
     case 'load-account-list': loadAccountBatch(control.dataset.list); break;

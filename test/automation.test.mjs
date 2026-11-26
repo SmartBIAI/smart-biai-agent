@@ -19,9 +19,13 @@ function setup(t, overrides = {}) {
     generate: body => videos.set(body.id, { id: body.id, credits: body.credits, status: 'generating' }),
     video: id => videos.get(id),
     publication: id => publications.get(id),
-    publish: async (body, _mode, check) => {
-      check();
-      publications.set(body.id, { ...body, status: 'scheduled' });
+    publish: async (body, _mode, { beforeInsert, awaitingReview }) => {
+      beforeInsert();
+      publications.set(body.id, { ...body, status: awaitingReview ? 'awaiting_review' : 'scheduled' });
+    },
+    reviewPublication: (id, _mode, { action, ...updates }) => {
+      const status = { approve: 'scheduled', reject: 'rejected', cancel: 'canceled' }[action];
+      Object.assign(publications.get(id), updates, { status });
     },
     ...overrides
   };
@@ -37,7 +41,7 @@ function setup(t, overrides = {}) {
   return { db, store, videos, publications, dependencies, save, manage, complete, at, switchScope: () => { scope = 'other'; } };
 }
 
-test('a confirmed manual-review rule creates an execution once and schedules publication only after approval', async t => {
+test('manual-review generation creates one held schedule and approval releases that same publication', async t => {
   const h = setup(t), rule = await h.save();
   h.at('2026-11-26T08:00:30Z');
   await h.store.tick();
@@ -49,15 +53,18 @@ test('a confirmed manual-review rule creates an execution once and schedules pub
   assert.equal(h.store.list('mock').rules[0].enabled, false);
   h.complete();
   await h.store.tick();
+  await h.store.tick();
   const [run] = h.store.list('mock').runs;
-  assert.equal(run.status, 'review');
-  assert.equal(h.publications.size, 0);
+  assert.equal(run.status, 'awaiting_review');
+  assert.equal(h.publications.size, 1);
+  assert.equal(h.publications.get(run.publicationId).status, 'awaiting_review');
   assert.throws(() => h.store.review('live', { id: run.id, action: 'approve' }), { status: 404 });
   h.store.review('mock', { id: run.id, action: 'approve', title: '审核后的标题' });
   assert.throws(() => h.store.review('mock', { id: run.id, action: 'approve' }), { status: 409 });
   await Promise.all([h.store.tick(), h.store.tick()]);
   assert.equal(h.publications.size, 1);
   const [published] = h.publications.values();
+  assert.equal(published.id, run.publicationId);
   assert.equal(published.planned, Date.parse('2026-11-26T08:30Z'));
   assert.equal(published.title, '审核后的标题');
   assert.equal(h.store.run('mock', run.id).status, 'scheduled');
@@ -112,24 +119,26 @@ test('late losses are visible, passed manual schedules can be moved, and rejecti
   h.at('2026-11-26T08:40Z');
   h.complete();
   await h.store.tick();
+  await h.store.tick();
   assert.throws(() => h.store.review('mock', { id: manual.id, action: 'approve' }), { status: 400 });
   h.store.review('mock', { id: manual.id, action: 'approve', planned: '2026-11-26T09:00' });
-  h.store.review('mock', { id: manual.id, action: 'cancel' });
-  await h.store.tick();
+  assert.equal(h.store.run('mock', manual.id).publishAt, Date.parse('2026-11-26T09:00Z'));
   const rejected = h.manage(await h.save(), 'run');
-  await h.store.tick(); h.complete(); await h.store.tick();
+  await h.store.tick(); h.complete(); await h.store.tick(); await h.store.tick();
   h.store.review('mock', { id: rejected.id, action: 'reject' });
-  await h.store.tick();
   assert.equal(h.store.run('mock', rejected.id).status, 'rejected');
-  assert.equal(h.publications.size, 0);
+  const canceled = h.manage(await h.save(), 'run');
+  await h.store.tick(); h.complete(); await h.store.tick(); await h.store.tick();
+  h.store.review('mock', { id: canceled.id, action: 'cancel' });
+  assert.equal(h.store.run('mock', canceled.id).status, 'canceled');
 });
 
 test('cancel during asynchronous release and recovery after publication insertion use the original publication ID', async t => {
   const h = setup(t);
   let resume;
-  h.dependencies.publish = async (body, mode, check) => {
+  h.dependencies.publish = async (body, mode, { beforeInsert }) => {
     await new Promise(resolve => { resume = resolve; });
-    check();
+    beforeInsert();
     h.publications.set(body.id, { ...body, status: 'scheduled' });
   };
   const run = h.manage(await h.save({ policy: 'auto' }), 'run');
@@ -148,4 +157,17 @@ test('cancel during asynchronous release and recovery after publication insertio
   await reopened.tick();
   assert.equal(reopened.run('mock', recovery.id).publicationId, row.publication_id);
   assert.equal(h.publications.size, 1);
+});
+
+test('legacy awaiting-review runs create held schedules while legacy approved runs create regular schedules', async t => {
+  const h = setup(t);
+  const first = h.manage(await h.save(), 'run');
+  const second = h.manage(await h.save(), 'run');
+  await h.store.tick();
+  h.complete();
+  h.db.prepare("UPDATE automation_run SET status='review' WHERE id=?").run(first.id);
+  h.db.prepare("UPDATE automation_run SET status='release',approval=? WHERE id=?").run(JSON.stringify({ title: '已审核', description: '' }), second.id);
+  await h.store.tick();
+  assert.equal(h.store.run('mock', first.id).status, 'awaiting_review');
+  assert.equal(h.store.run('mock', second.id).status, 'scheduled');
 });

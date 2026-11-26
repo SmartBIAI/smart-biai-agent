@@ -17,7 +17,8 @@ import { createLiveJobs, migrateLive } from './live-jobs.mjs';
 import { webAccess } from './web-access.mjs';
 import { createWebSessions } from './web-sessions.mjs';
 import { accountTagScope, createAccountTags } from './account-tags.mjs';
-import { createAutomation } from './automation.mjs';
+import { createAutomation, wallTime } from './automation.mjs';
+import { automationDraftChanges, collectAutomationDraft } from './automation-draft.mjs';
 import { validateAccountFilters } from './web/account-properties.js';
 import { httpsOrigin, mediaTypes, normalizeOssRegion, ossEndpoint, ossReferenceLinks, signedLocalMedia, storagePrefix, verifyLocalMedia } from './media-storage.mjs';
 
@@ -262,12 +263,16 @@ function generationView(row, mode) {
 
 function publicationView(row) {
   if (!row) fail(404, '未找到这项发布任务。');
+  const awaitingReview = row.status === 'awaiting_review';
   return {
     id: row.id, generationId: row.generation_id, accountId: row.account, title: row.title,
     description: row.description, coverUrl: row.mode === 'mock' ? generationResult(row.generation_id, row.created).coverUrl : row.cover, ai: Boolean(row.ai), planned: row.planned,
     zone: row.zone, status: row.status, created: row.created, submitted: row.submitted, updated: row.updated,
     sourceTaskId: row.source_id, materialId: row.material_id, error: row.error, mode: row.mode,
-    account: row.account_snapshot ? JSON.parse(row.account_snapshot) : null
+    account: row.account_snapshot ? JSON.parse(row.account_snapshot) : null,
+    ...(awaitingReview ? {
+      automationRunId: database.prepare('SELECT id FROM automation_run WHERE publication_id=? AND mode=?').get(row.id, row.mode)?.id
+    } : {})
   };
 }
 
@@ -283,7 +288,7 @@ function timezone(value) {
   catch { fail(400, '请选择有效的时区。'); }
 }
 
-async function createPublication(body, mode, beforeInsert) {
+async function createPublication(body, mode, { beforeInsert, awaitingReview = false } = {}) {
   const id = validId(body.id);
   const generationId = validId(body.generationId);
   const generation = getGeneration.get(generationId);
@@ -314,15 +319,15 @@ async function createPublication(body, mode, beforeInsert) {
         existing.planned !== planned) fail(409, '该任务编号已用于另一份发布草稿。');
     return publicationView(existing);
   }
-  if (planned !== null && (!Number.isSafeInteger(planned) || planned <= now)) fail(400, '请选择晚于现在的预约时间。');
-  if (live && generation.state !== 'completed' || generation.expires !== null && generation.expires <= (planned ?? now)) {
+  if (awaitingReview && planned === null || planned !== null && (!Number.isSafeInteger(planned) || !awaitingReview && planned <= now)) fail(400, '请选择有效的预约时间。');
+  if (live && generation.state !== 'completed' || generation.expires !== null && generation.expires <= Math.max(planned ?? now, now)) {
     fail(400, '这个视频在所选时间无法使用，请调整预约时间或更换视频。');
   }
   beforeInsert?.();
   database.prepare(`INSERT INTO publication
     (id, generation_id, account, title, description, cover, ai, planned, zone, status, created, updated, mode, scope, video_scope, account_snapshot)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, generationId, account.id, title, description, cover, ai,
-    planned, zone, planned === null ? 'queued' : 'scheduled', now, now, mode, connection.scope ?? null,
+    planned, zone, awaitingReview ? 'awaiting_review' : planned === null ? 'queued' : 'scheduled', now, now, mode, connection.scope ?? null,
     generation.scope, live ? JSON.stringify(account) : null);
   return publicationView(getPublication.get(id));
 }
@@ -588,6 +593,7 @@ async function conversationAgent(body, mode) {
     const recent=database.prepare('SELECT data FROM agent_turn WHERE mode=? AND conversation_id=? ORDER BY created DESC LIMIT 3').all(mode,conversationId).map(row=>JSON.parse(row.data));
     const zone=readSetting('preferences').zone||'Asia/Shanghai';
     const accountQuery=filters=>queryAccounts(mode,filters);
+    let automationDraft = latestAutomationDraft(snapshot.chat);
     const resource=async(kind,targetId,refresh=false)=>{
       validId(targetId);
       let result;
@@ -618,7 +624,12 @@ async function conversationAgent(body, mode) {
       file:async fileId=>{const file=await getUpload(fileId);return {id:file.id,name:file.name,size:file.size,type:mediaTypes[extname(file.name).toLowerCase()][0]};},
       accounts:accountQuery,
       accountTags:async()=>accountTags.snapshot(tagScope(mode)).tags,
-      automation:(tool, args)=>automationAgentCard(mode, tool, args),
+      automationDraft: () => automationDraft,
+      automation: async (tool, args) => {
+        const result = await automationAgentCard(mode, tool, args, automationDraft, zone);
+        if (result.card.kind === 'draft') automationDraft = result.card;
+        return result;
+      },
       quote:(kind,parameters)=>kind==='image'?imageJobs.quote(parameters,mode):estimate(parameters,mode),
       outputUrl:url=>mode==='mock'?new URL(url,'https://demo.invalid/').href:url
     });
@@ -733,10 +744,27 @@ const automation = createAutomation(database, {
     const row = getPublication.get(id);
     return row?.mode === mode ? publicationView(row) : null;
   },
+  reviewPublication: (id, mode, { action, planned, title, description }) => {
+    const row = getPublication.get(id);
+    if (!row || row.mode !== mode || row.status !== 'awaiting_review') fail(409, '排期已更新，请刷新后重试。');
+    if (action === 'approve') {
+      const platform = row.account_snapshot ? JSON.parse(row.account_snapshot).platform : accounts.find(account => account.id === row.account)?.platform;
+      database.prepare("UPDATE publication SET status='scheduled',planned=?,title=?,description=?,updated=? WHERE id=?")
+        .run(planned, title, platform === 'YouTube' ? description : '', Date.now(), id);
+    } else {
+      database.prepare('UPDATE publication SET status=?,updated=? WHERE id=?')
+        .run(action === 'reject' ? 'rejected' : 'canceled', Date.now(), id);
+    }
+  },
   quote: estimate, generate: createGeneration, publish: createPublication
 });
 
-function automationAgentCard(mode, tool, args) {
+function latestAutomationDraft(chat) {
+  const last = chat.findLast(entry => ['draft', 'saved'].includes(entry.automation?.kind))?.automation;
+  return last?.kind === 'draft' ? last : null;
+}
+
+async function automationAgentCard(mode, tool, args, currentDraft, zone) {
   if (tool === 'list_automations') {
     const keyword = validateText(args.keyword ?? '', 80, '规则名称', false).toLowerCase();
     const data = automation.list(mode, args.ruleId ? validId(args.ruleId) : '');
@@ -752,27 +780,52 @@ function automationAgentCard(mode, tool, args) {
   if (action === 'review') {
     const run = automation.run(mode, validId(args.runId));
     if (!run.reviewable) fail(409, '该任务当前无需审核。');
-    return { text: '打开审核卡片可预览视频、检查文案并确认排期。', card: { kind: 'review', id: run.ruleId, runId: run.id, name: run.name } };
+    return { text: '这条视频已排期并等待人工审核。打开卡片可预览视频、检查文案并确认发布。', card: { kind: 'review', id: run.ruleId, runId: run.id, name: run.name } };
   }
   const rule = action === 'create' ? null : automation.rule(mode, validId(args.ruleId));
   if (action === 'edit' && rule.enabled) fail(409, '请先暂停规则，再准备修改。');
-  if (action === 'create' || action === 'edit') {
-    const input = args.changes ?? {};
-    const proposal = {};
-    const fields = { name: 80, zone: 80, startsAt: 16, frequency: 10, publishAt: 5, policy: 10, accountId: 19, title: 100, description: 1000 };
-    for (const [field, max] of Object.entries(fields)) if (input[field] !== undefined) proposal[field] = validateText(input[field], max, field, false);
-    if (Number.isSafeInteger(input.maxCredits)) proposal.maxCredits = input.maxCredits;
-    if (input.video && typeof input.video === 'object') {
-      proposal.video = {};
-      for (const [field, max] of Object.entries({ model: 180, prompt: 20000, ratio: 16, resolution: 20 })) {
-        if (input.video[field] !== undefined) proposal.video[field] = validateText(input.video[field], max, field, false);
-      }
-      if (Number.isInteger(input.video.duration)) proposal.video.duration = input.video.duration;
-      if (typeof input.video.audio === 'boolean') proposal.video.audio = input.video.audio;
-    }
-    return { text: '规则草稿已准备。请打开草稿，检查并补齐设置后保存。', card: { kind: action, id: rule?.id, name: rule?.name, proposal } };
+  if (action === 'create') {
+    const card = await collectAutomationDraft(args.newDraft === true ? null : currentDraft, args.changes ?? {}, {
+      zone, modelCatalog: () => mode === 'mock' ? models : liveModels(),
+      findAccount: async id => (await queryAccounts(mode, { id })).accounts[0]
+    });
+    const text = card.ready ? '规则参数已齐全，请检查并确认草稿。'
+      : card.issues.length ? '我已保留本轮参数，草稿中列出了需要调整的内容。'
+      : '我已记录当前信息，可以继续在对话中补充。';
+    return { text, card };
+  }
+  if (action === 'edit') {
+    return { text: '规则修改草稿已准备，请检查参数后保存。', card: {
+      kind: action, id: rule.id, name: rule.name, proposal: automationDraftChanges(args.changes ?? {})
+    } };
   }
   return { text: '请打开卡片检查规则，确认后执行此操作。', card: { kind: 'action', action, id: rule.id, name: rule.name } };
+}
+
+async function confirmAutomationDraft(mode, body) {
+  const conversationId = validId(body.conversationId), id = validId(body.id), version = validId(body.version);
+  const read = () => conversationView(database.prepare('SELECT * FROM conversation WHERE mode=? AND id=?').get(mode, conversationId));
+  const snapshot = read();
+  if (snapshot.chat.some(entry => entry.automation?.kind === 'saved' && entry.automation.id === id && entry.automation.version === version)) {
+    return { rule: automation.rule(mode, id), conversation: snapshot };
+  }
+  const draft = latestAutomationDraft(snapshot.chat);
+  if (snapshot.revision !== body.revision || draft?.id !== id || draft.version !== version) fail(409, '任务草稿已有更新，请查看最新卡片。');
+  if (!draft.ready) fail(400, '请先在对话中补齐任务参数。');
+  const rule = await automation.save(mode, { ...draft.proposal, id: undefined, revision: undefined }, {
+    ruleId: id,
+    check() {
+      if (read().revision !== snapshot.revision) fail(409, '任务草稿已有更新，请查看最新卡片。');
+      if (wallTime(draft.proposal.startsAt, draft.proposal.zone) <= Date.now()) fail(400, '首次生成时间已过，请在对话中更新后确认。');
+    },
+    record(saved) {
+      const index = snapshot.chat.findLastIndex(entry => entry.automation?.kind === 'draft' && entry.automation.version === version);
+      const chat = [...snapshot.chat];
+      chat[index] = { type: 'text', text: '规则已保存。可前往自动化任务确认启用。', automation: { kind: 'saved', id, version, name: saved.name } };
+      saveConversation(mode, conversationId, { revision: snapshot.revision, chat, drafts: snapshot.drafts });
+    }
+  });
+  return { rule, conversation: read() };
 }
 
 function conversationView(row) {
@@ -845,6 +898,7 @@ async function api(request, path) {
   if (method === 'POST') {
     const body = await readBody(request, conversation ? 2_000_000 : undefined);
     if (path === '/api/automation/save') return automation.save(mode, { ...body, ...(body.id ? { id: validId(body.id) } : {}) });
+    if (path === '/api/automation/confirm-draft') return confirmAutomationDraft(mode, body);
     if (path === '/api/automation/manage') return automation.manage(mode, { ...body, id: validId(body.id) });
     if (path === '/api/automation/review') return automation.review(mode, { ...body, id: validId(body.id) });
     if (path === '/api/account-tags') return accountTags.save(tagWriteScope(mode, body), body);
@@ -878,7 +932,7 @@ async function api(request, path) {
       const id = validId(cancel[1]);
       const row = getPublication.get(id);
       if (!row || row.mode !== mode) fail(404, '未找到这项发布任务。');
-      const result = database.prepare("UPDATE publication SET status = 'canceled', updated = ? WHERE id = ? AND status = 'scheduled' AND payload IS NULL").run(Date.now(), id);
+      const result = database.prepare("UPDATE publication SET status = 'canceled', updated = ? WHERE id = ? AND status IN ('scheduled','awaiting_review') AND payload IS NULL").run(Date.now(), id);
       if (!result.changes && row.status !== 'canceled') fail(409, '这条任务已开始发布，无法取消预约。');
       return publicationView(getPublication.get(id));
     }

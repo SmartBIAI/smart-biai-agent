@@ -8,7 +8,7 @@ COPY image-jobs.mjs generation-models.js ./
 COPY agent.mjs agent-mock.mjs ./
 COPY web-sessions.mjs ./
 COPY account-tags.mjs ./
-COPY automation.mjs ./
+COPY automation.mjs automation-draft.mjs ./
 COPY web/index.html web/app.js web/styles.css ./web/
 COPY web/account-properties.js web/account-tag-controls.js ./web/
 COPY web/automation.js ./web/

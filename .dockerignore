@@ -11,6 +11,7 @@
 !web-sessions.mjs
 !account-tags.mjs
 !automation.mjs
+!automation-draft.mjs
 !image-jobs.mjs
 !generation-models.js
 !agent.mjs
